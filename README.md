@@ -6,7 +6,7 @@ Esta demo jugable en el navegador (Three.js) sirve para aprender las reglas y pr
 
 ## ▶ Jugar
 
-**Online:** https://USUARIO.github.io/REPOSITORIO/ *(enlace de GitHub Pages)*
+**Online:** https://artearc.github.io/sulphur-tcg/
 
 No hace falta instalar nada: ábrelo en Chrome, Edge o Firefox en un ordenador (recomendado 1280×720 o más).
 
