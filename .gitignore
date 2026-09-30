@@ -1,0 +1,8 @@
+# Documentos de diseño originales (privados)
+*.pdf
+
+# Configuración local
+.claude/
+__pycache__/
+.DS_Store
+Thumbs.db
