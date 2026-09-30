@@ -393,6 +393,7 @@ function scaleIcon(t, x, y, s, tone) {
 
 // ───────────────────────── ilustraciones por carta ─────────────────────────
 const ART = {
+  diomedes(t, a, r, W, H) { ART.ulises(t, a, r, W, H); },
   diablillo(t, a, r, W, H) {
     sky(t, W, H, 0.15, 0.3); glow(t, W * 0.5, H * 0.95, H * 0.8, 0.95, 0.2);
     tomb(t, W * 0.15, H * 0.98, 120, true, r, a); tomb(t, W * 0.88, H * 0.98, 110, true, r, a);
@@ -714,9 +715,82 @@ function pilgrimArt(id) {
       sky(t, W, H, 0.9, 0.6); columns(t, W, H, r, 0.6, 3); fogBands(t, W, H, r, 5, 0.5);
       const f = figure(t, { x: W * 0.5, y: H * 0.98, h: H * 0.82, pose: 'reach', robe: 1.3, laurel: true, tone: 0.1, hi: 0.35 });
       glowA(a, f.hands[1][0], f.hands[1][1], 50, 0.9); t.fillStyle = g(1); t.beginPath(); t.arc(f.hands[1][0], f.hands[1][1], 12, 0, 7); t.fill();
+    } else if (id === 'farinata') {
+      sky(t, W, H, 0.15, 0.1); glow(t, W / 2, H, H * 0.9, 1, 0.2);
+      tomb(t, W * 0.5, H * 1.02, W * 0.8, true, r, a);
+      const f = figure(t, { x: W * 0.5, y: H * 0.78, h: H * 0.62, pose: 'spread', robe: 1.1, tone: 0.06, hi: 0.3 });
+      flames(a, W * 0.5, H * 0.95, W * 0.9, H * 0.45, r, '#fff', 9);
+    } else if (id === 'forese') {
+      sky(t, W, H, 0.55, 0.35); rain(t, W, H, r, 120, 0.25, 0.5);
+      t.strokeStyle = g(0.12); t.lineWidth = 8; t.beginPath(); t.moveTo(W * 0.82, H); t.lineTo(W * 0.8, H * 0.2); t.stroke();
+      for (let k = 0; k < 7; k++) { t.beginPath(); t.moveTo(W * 0.8, H * (0.25 + k * 0.08)); t.lineTo(W * (0.62 + r() * 0.1), H * (0.15 + k * 0.08)); t.stroke(); }
+      for (let k = 0; k < 6; k++) { a.fillStyle = '#fff'; a.beginPath(); a.arc(W * (0.64 + r() * 0.12), H * (0.2 + r() * 0.4), 9, 0, 7); a.fill(); }
+      figure(t, { x: W * 0.42, y: H * 0.98, h: H * 0.78, pose: 'reach', broad: 0.7, tone: 0.1, hi: 0.35 });
+    } else if (id === 'eneas') {
+      sky(t, W, H, 0.3, 0.15); arches(t, W, H, 0.1, 4);
+      const f = figure(t, { x: W * 0.5, y: H * 0.98, h: H * 0.8, pose: 'reach', robe: 1.2, crown: true, tone: 0.08, hi: 0.35 });
+      const [hx, hy] = f.hands[1]; t.strokeStyle = g(0.9); a.strokeStyle = '#fff'; t.lineWidth = a.lineWidth = 6;
+      for (const c of [t, a]) { c.beginPath(); c.moveTo(hx, hy); c.lineTo(hx + 40, hy - 90); c.stroke(); for (let k = 0; k < 5; k++) { c.beginPath(); c.ellipse(hx + 12 + k * 7, hy - 25 - k * 15, 12, 5, -0.8 + (k % 2) * 1.6, 0, 7); c === a ? c.fill() : c.stroke(); } }
+      glowA(a, hx + 20, hy - 50, 80, 0.6);
+    } else if (id === 'ulises') {
+      sky(t, W, H, 0.08, 0.2); glow(t, W / 2, H * 0.5, 240, 0.95, 0.1);
+      flames(t, W * 0.4, H * 0.98, 190, H * 0.95, r, g(0.95), 3); flames(t, W * 0.62, H * 0.98, 170, H * 0.85, r, g(0.95), 3);
+      flames(a, W * 0.5, H * 0.98, 320, H * 0.95, rng(8), 'rgba(255,255,255,.85)', 6);
+      figure(t, { x: W * 0.5, y: H * 0.98, h: H * 0.7, pose: 'hold', hood: true, robe: 1.1, tone: 0.06, hi: 0.3 });
+    } else if (id === 'dante') {
+      sky(t, W, H, 0.12, 0.25); iceFloor(t, W, H, H * 0.65, r);
+      figure(t, { x: W * 0.72, y: H * 0.7, h: H * 0.85, pose: 'spread', wings: 0.6, horns: 1.2, sixArms: true, tone: 0.28, hi: 0.4 });
+      figure(t, { x: W * 0.38, y: H * 0.98, h: H * 0.78, pose: 'stand', robe: 1.2, laurel: true, hood: true, tone: 0.06, hi: 0.3 });
+      crystals(t, a, W * 0.5, H, W, r, 10);
     } else {
       sky(t, W, H, 0.7, 0.4); columns(t, W, H, r, 0.5, 3);
-      figure(t, { x: W * 0.5, y: H * 0.98, h: H * 0.8, pose: 'stand', robe: 1.2, laurel: id === 'dante', hood: id === 'dante', tone: 0.1, hi: 0.35 });
+      figure(t, { x: W * 0.5, y: H * 0.98, h: H * 0.8, pose: 'stand', robe: 1.2, tone: 0.1, hi: 0.35 });
+    }
+  };
+}
+
+// ───────────────────────── arte automático (cartas sin ilustración propia) ─────────────────────────
+const BG = {
+  ira: (t, a, r, W, H) => { sky(t, W, H, 0.12, 0.28); glow(t, W / 2, H, H * 0.9, 0.95, 0.2); flames(t, W / 2, H, W * 1.1, H * 0.3, r, g(0.9), 10); flames(a, W / 2, H, W * 1.1, H * 0.3, rng(5), 'rgba(255,255,255,.85)', 10); },
+  gula: (t, a, r, W, H) => { sky(t, W, H, 0.5, 0.3); rain(t, W, H, r, 130, 0.22, 0.55); t.fillStyle = g(0.22); t.fillRect(0, H * 0.82, W, H * 0.18); },
+  avaricia: (t, a, r, W, H) => { sky(t, W, H, 0.1, 0.18); arches(t, W, H, 0.08, 5); coins(t, a, W / 2, H, W, r, 35); },
+  fraude: (t, a, r, W, H) => { sky(t, W, H, 0.2, 0.1); arches(t, W, H, 0.05, 7); fogBands(t, W, H, r, 6, 0.45); },
+  traicion: (t, a, r, W, H) => { sky(t, W, H, 0.08, 0.22); iceFloor(t, W, H, H * 0.62, r); },
+  neutral: (t, a, r, W, H, d) => { const c = d.circle || 1; if (c <= 2) { sky(t, W, H, 0.88, 0.7); columns(t, W, H, r, 0.6, 4); fogBands(t, W, H, r, 5, 0.5); } else if (c === 7) { sky(t, W, H, 0.55, 0.7); t.fillStyle = g(0.7); t.fillRect(0, H * 0.8, W, H * 0.2); t.fillStyle = g(0.3); t.fillRect(0, H * 0.86, W, 14); } else { sky(t, W, H, 0.35, 0.15); glow(t, W / 2, H * 0.3, 200, 0.9, 0.3); } },
+};
+function autoArt(id, d) {
+  return (t, a, r, W, H) => {
+    (BG[d.senda] || BG.neutral)(t, a, r, W, H, d);
+    const sub = (d.sub || '') + ' ' + d.name; const kw = d.kw || [];
+    const accentEyes = (f) => { if (f) { eyes(a, f.hx, f.hy, 6, 3); eyesT(t, f.hx, f.hy, 6, 3); } };
+    if (d.type === 'ente' || d.type === 'ilustre') {
+      const big = d.type === 'ilustre' ? 0.85 : 0.72; let f = null;
+      if (/Centauro|Arquero|arquero/.test(sub)) { beast(t, { x: W * 0.42, y: H * 0.96, s: W * 0.66, kind: 'none', tone: 0.06, hi: 0.3 }); f = figure(t, { x: W * 0.68, y: H * 0.6, h: H * 0.48, pose: 'strike', tone: 0.06, hi: 0.3, noLegs: true }); t.strokeStyle = g(0.1); t.lineWidth = 4; t.beginPath(); t.arc(f.hands[0][0], f.hands[0][1], 70, -1.2, 1.2); t.stroke(); }
+      else if (/Bestia|Arpía|Monstruo|Titán|Erisicton|Carroñero/.test(sub)) { const b = beast(t, { x: W * 0.45, y: H * 0.96, s: W * big, kind: 'dog', heads: /Arpía/.test(sub) ? 1 : 1, tone: 0.05, hi: 0.3, bulk: /Titán|hinchado/.test(sub) ? 0.3 : 0.2 }); if (kw.includes('vuelo') || /Arpía/.test(sub)) wings(t, W * 0.45, H * 0.5, W * 0.4, g(0.1), 0.9); for (const [hx, hy] of b.heads) { a.fillStyle = '#fff'; a.beginPath(); a.arc(hx, hy, 4, 0, 7); a.fill(); } }
+      else if (/Larva|Gusano|Sanguijuela/.test(sub)) { t.fillStyle = g(0.1); t.beginPath(); t.ellipse(W * 0.5, H * 0.62, 170, 64, -0.2, 0, 7); t.fill(); for (let k = 0; k < 7; k++) { t.strokeStyle = g(0.4); t.lineWidth = 3; t.beginPath(); t.ellipse(W * 0.5 - 120 + k * 40, H * 0.62 - 12 + k * 3, 8, 52, -0.2, 0, 7); t.stroke(); } a.fillStyle = '#fff'; a.beginPath(); a.ellipse(W * 0.74, H * 0.54, 24, 18, 0, 0, 7); a.fill(); }
+      else if (/Sombra|Espectro/.test(sub)) { f = figure(t, { x: W * 0.5, y: H * 0.92, h: H * big, pose: 'spread', robe: 1.4, wings: kw.includes('vuelo') ? 0.6 : 0, tone: 0.28, hi: 0.5, noLegs: true }); fogBands(t, W, H, r, 4, 0.4); accentEyes(f); }
+      else if (/Demonio/.test(sub)) { f = figure(t, { x: W * 0.5, y: H * 0.98, h: H * big, pose: r() < 0.5 ? 'strike' : 'raised', horns: 1 + r() * 0.5, wings: kw.includes('vuelo') || r() < 0.3 ? 0.5 : 0, broad: 1.1 + r() * 0.3, tone: 0.05, hi: 0.3 }); accentEyes(f); }
+      else { const poses = ['stand', 'hold', 'reach', 'pray', 'cower', 'raised']; f = figure(t, { x: W * 0.5, y: H * 0.98, h: H * big, pose: poses[Math.floor(r() * poses.length)], hood: /Falsario|Traidor|Hipócrita/.test(sub), robe: /Falsario|Hipócrita|Juez|Barquero|Tesorero/.test(sub) ? 1.2 : 0, crown: d.type === 'ilustre' && r() < 0.5, laurel: d.type === 'ilustre' && r() >= 0.5, bloat: d.senda === 'gula' && r() < 0.5, tone: 0.07, hi: 0.32 }); accentEyes(f); }
+      if (kw.includes('asedio') && f && f.hands) { const hd = f.hands[f.hands.length - 1]; sword(t, hd[0], hd[1], hd[0] + 110, hd[1] - 100, 14, 0.85); a.save(); sword(a, hd[0], hd[1], hd[0] + 110, hd[1] - 100, 14, 1); a.restore(); }
+      if (d.senda === 'traicion') crystals(t, a, W * 0.5, H, W * 0.8, r, 7);
+      if (d.senda === 'fraude' && f) mask(a, f.hx, f.hy, 36, '#fff', false);
+    } else if (d.type === 'rito') {
+      if (d.senda === 'ira') { flames(t, W * 0.5, H * 0.95, W * 0.9, H * 0.8, r, g(0.95), 12); flames(a, W * 0.5, H * 0.95, W * 0.9, H * 0.8, rng(2), '#fff', 12); for (let i = 0; i < 3; i++) figure(t, { x: W * (0.3 + i * 0.2), y: H * 0.95, h: 120, pose: 'raised', tone: 0.05, hi: 0.2, noLegs: true }); }
+      else if (d.senda === 'gula') { t.fillStyle = g(0.15); t.beginPath(); t.ellipse(W / 2, H * 0.5, 170, 110, 0, 0, 7); t.fill(); a.fillStyle = '#fff'; a.beginPath(); a.ellipse(W / 2, H * 0.5, 120, 60, 0, 0, 7); a.fill(); t.fillStyle = g(0.85); for (let i = -3; i <= 3; i++) { t.beginPath(); t.moveTo(W / 2 + i * 34 - 12, H * 0.42); t.lineTo(W / 2 + i * 34 + 12, H * 0.42); t.lineTo(W / 2 + i * 34, H * 0.52); t.fill(); } }
+      else if (d.senda === 'avaricia') { coins(t, a, W / 2, H * 0.9, W * 0.9, r, 90); t.fillStyle = g(0.9); t.beginPath(); t.arc(W / 2, H * 0.4, 90, 0, 7); t.fill(); drawSealShape(t, W / 2, H * 0.4, 60, g(0.3)); a.fillStyle = '#fff'; a.beginPath(); a.arc(W / 2, H * 0.4, 90, 0, 7); a.fill(); }
+      else if (d.senda === 'fraude') { for (let i = 0; i < 5; i++) mask(t, W * (0.15 + i * 0.175), H * (0.4 + (i % 2) * 0.2), 80 + r() * 50, g(0.85 - i * 0.1)); mask(a, W * 0.5, H * 0.4, 150, '#fff', false); }
+      else if (d.senda === 'traicion') { crystals(t, a, W * 0.5, H * 0.95, W, r, 16); figure(t, { x: W / 2, y: H * 0.7, h: 200, pose: 'cower', tone: 0.1, hi: 0.3 }); }
+      else { for (let i = 0; i < 9; i++) { const k = 1 - i / 9; t.fillStyle = g(0.85 * k + 0.05); t.beginPath(); t.ellipse(W / 2, H * (0.2 + i * 0.07), W * 0.46 * k + 20, H * 0.1 * k + 8, 0, 0, 7); t.fill(); } }
+    } else if (d.type === 'juicio') {
+      const f = figure(t, { x: W * 0.5, y: H * 1.05, h: H * 0.82, pose: r() < 0.5 ? 'reach' : 'raised', tone: 0.06, hi: 0.3 });
+      const [hx, hy] = f.hands[f.hands.length - 1]; t.strokeStyle = g(1); a.strokeStyle = '#fff'; t.lineWidth = 6; a.lineWidth = 10;
+      for (const c of [t, a]) { c.beginPath(); c.moveTo(hx, hy); let x = hx, y = hy; for (let k = 0; k < 6; k++) { x += (r() - 0.5) * 60 + 10; y -= 40; c.lineTo(x, y); } c.stroke(); }
+      glowA(a, hx, hy, 80, 0.7);
+    } else if (d.type === 'reliquia') {
+      glow(t, W / 2, H * 0.45, 220, 0.9, 0.15);
+      if (d.senda === 'ira') { t.fillStyle = g(0.15); t.fillRect(W * 0.48, H * 0.1, 10, H * 0.85); t.fillStyle = g(0.8); t.beginPath(); t.moveTo(W * 0.5, H * 0.12); t.lineTo(W * 0.85, H * 0.2); t.lineTo(W * 0.72, H * 0.33); t.lineTo(W * 0.85, H * 0.46); t.lineTo(W * 0.5, H * 0.4); t.fill(); flames(a, W * 0.66, H * 0.46, 220, 190, r, '#fff', 5); }
+      else if (d.senda === 'avaricia') { coins(t, a, W / 2, H * 0.62, 180, r, 30); t.fillStyle = g(0.9); t.beginPath(); t.arc(W / 2, H * 0.4, 70, 0, 7); t.fill(); a.fillStyle = '#fff'; a.beginPath(); a.arc(W / 2, H * 0.4, 70, 0, 7); a.fill(); }
+      else { chainsDraw(t, W * 0.1, H * 0.2, W * 0.9, H * 0.7, 0.2, 12); sword(t, W * 0.5, H * 0.95, W * 0.5, H * 0.1, 24, 0.8); a.save(); sword(a, W * 0.5, H * 0.85, W * 0.5, H * 0.1, 20, 1); a.restore(); }
     }
   };
 }
@@ -781,6 +855,13 @@ export function drawIcon(c, key, x, y, s, col = '#1a120c', ink = '#140d08') {
       c.moveTo(0, -46); c.lineTo(40, -22); c.lineTo(40, 22); c.lineTo(0, 46); c.lineTo(-40, 22); c.lineTo(-40, -22); c.closePath(); c.fill(); c.stroke(); break;
     case 'sword':
       c.moveTo(-6, -48); c.lineTo(6, -48); c.lineTo(6, 20); c.lineTo(-6, 20); c.closePath(); c.fill(); c.stroke(); c.beginPath(); c.moveTo(-22, 20); c.lineTo(22, 20); c.moveTo(0, 20); c.lineTo(0, 44); c.lineWidth = 9; c.strokeStyle = col; c.stroke(); break;
+    case 'asedio':
+      c.moveTo(-44, 14); c.lineTo(20, 14); c.lineTo(20, -14); c.lineTo(-44, -14); c.closePath(); c.fill(); c.stroke(); hatch();
+      c.beginPath(); c.moveTo(20, -24); c.lineTo(44, -12); c.lineTo(44, 12); c.lineTo(20, 24); c.closePath(); c.fillStyle = ink; c.fill();
+      c.beginPath(); c.arc(-30, 28, 10, 0, 7); c.arc(8, 28, 10, 0, 7); c.stroke(); break;
+    case 'sepultar':
+      c.moveTo(-28, 44); c.lineTo(-28, -14); c.quadraticCurveTo(-28, -44, 0, -44); c.quadraticCurveTo(28, -44, 28, -14); c.lineTo(28, 44); c.closePath(); c.fill(); c.stroke(); hatch();
+      c.beginPath(); c.moveTo(0, -30); c.lineTo(0, 10); c.moveTo(-14, -14); c.lineTo(14, -14); c.lineWidth = 6; c.strokeStyle = ink; c.stroke(); break;
     case 'hourglass':
       c.moveTo(-26, -40); c.lineTo(26, -40); c.lineTo(4, 0); c.lineTo(26, 40); c.lineTo(-26, 40); c.lineTo(-4, 0); c.closePath(); c.fill(); c.stroke(); break;
     case 'seal':
@@ -956,7 +1037,7 @@ function drawMainCard(id, d) {
   paper(c, CW, CH, hashStr(id));
   const sd = d.senda ? SENDAS[d.senda] : null;
   const accent = sd ? { light: sd.light, color: sd.color } : null;
-  const artFn = ART[id] || ART.prevision;
+  const artFn = ART[id] || autoArt(id, d);
   let ax = 0, ay = 0, aw = CW, ah = 478;
   if (d.type === 'rito') { ax = 26; ay = 26; aw = CW - 52; ah = 430; }
   if (d.type === 'juicio') { ax = 30; ay = 30; aw = CW - 60; ah = 440; }

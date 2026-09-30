@@ -593,8 +593,10 @@ export class View {
       const from = new THREE.Vector3(this.rowX(e), 0.3, (e.ctrl === 0 ? 1 : -1) * (LAYOUT.vanZ - 0.5) - (e.ctrl === 0 ? 0.55 : -0.55));
       let to;
       if (b && g.inPlay(b)) to = new THREE.Vector3(this.rowX(e), 0.3, (b.ctrl === 0 ? 1 : -1) * 0.55);
-      else { const P = this.pilgrims[1 - e.ctrl]; to = P.mesh.position.clone(); to.y = 0.3; to.x += (this.rowX(e)) * 0.12; to.z += (e.ctrl === 0 ? 0.6 : -0.6); }
-      want.set(e.uid, [from, to, b ? 0xffb040 : 0xff3a1a]);
+      else if (e.siege && g.find(e.siege) && g.inPlay(g.find(e.siege))) { to = this.worldPos(e.siege); if (to) { to = to.clone(); to.y = 0.3; to.z += e.ctrl === 0 ? 0.5 : -0.5; } }
+      if (!to && b && g.inPlay(b)) to = new THREE.Vector3(this.rowX(e), 0.3, (b.ctrl === 0 ? 1 : -1) * 0.55);
+      if (!to) { const P = this.pilgrims[1 - e.ctrl]; to = P.mesh.position.clone(); to.y = 0.3; to.x += (this.rowX(e)) * 0.12; to.z += (e.ctrl === 0 ? 0.6 : -0.6); }
+      want.set(e.uid, [from, to, b ? 0xffb040 : e.siege ? 0xff7a1a : 0xff3a1a]);
     }
     for (const [uid, a] of this.combatArrows) if (!want.has(uid)) { a.dispose(this.scene); this.combatArrows.delete(uid); }
     for (const [uid, [from, to, col]] of want) {
@@ -725,6 +727,12 @@ export class View {
     const A = this.audio;
     switch (name) {
       case 'draw': A && A.paper(); await this.sync(520); break;
+      case 'mill': {
+        A && A.paper(); const sg = d.pi === 0 ? 1 : -1;
+        const from = new THREE.Vector3(LAYOUT.mainDeck[0], 0.3, sg * LAYOUT.mainDeck[1]), to = new THREE.Vector3(LAYOUT.olvido[0], 0.2, sg * LAYOUT.olvido[1]);
+        for (let i = 0; i < (d.uids || []).length; i++) { this.fxDark.emit(from.x, 0.3, from.z, 30, { color: '#1a0e08', speed: 0.6, life: 1.2, spread: 0.5, up: 0.8 }); this.fxAdd.emit(to.x, 0.2, to.z, 24, { color: '#ff5a20', speed: 0.7, life: 0.9, spread: 0.5 }); await wait(160); }
+        shockwave(this.scene, to, 0x7a1a08, { size: 1.6, dur: 0.6 }); await this.sync(420); break;
+      }
       case 'absolve': {
         A && A.absolve(); await this.sync(620);
         const p = this.worldPos(d.uid); if (p) { this.fxAdd.emit(p.x, 0.2, p.z, 90, { color: '#ffd27a', speed: 0.8, life: 1.6, spread: 0.9, up: 1.6 }); this.flash(d.uid, '#ffd27a', 1.4); lightPillar(this.scene, p, 0xffd27a, { radius: 0.4 }); shockwave(this.scene, p, 0xffc860, { size: 2.2 }); this.post.doFlash(0xffe0a0, 0.06); }

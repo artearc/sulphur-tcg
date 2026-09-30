@@ -1,5 +1,7 @@
 // SULPHUR — interfaz: la mesa y las cartas son la interfaz; esto explica, señala, pregunta y confirma.
-import { CARDS, SOULS, PILGRIMS, CIRCLES, SENDAS, SENDA_KEYS, TYPES, KEYWORDS, GLOSSARY } from './data.js';
+import { CARDS, SOULS, PILGRIMS, PILGRIM_IDS, CIRCLES, SENDAS, SENDA_KEYS, TYPES, KEYWORDS, GLOSSARY } from './data.js';
+import { deckOptions } from './decks.js';
+import * as STATS from './stats.js';
 import * as ART from './art.js';
 import { isEnte } from './engine.js';
 import { CODEX } from './codex.js';
@@ -45,6 +47,7 @@ const TIPS = {
   quemar: ['Quemar', 'En Herejía los Entes destruidos se <b>Queman</b>: salen de la partida en lugar de ir al Olvido.', { kind: 'descenso', circle: 6 }],
   oro: ['Oro', 'En Avaricia la energía no gastada al final del turno se guarda como Oro (máximo 3).', { dom: '#hud0 .energy' }],
   prioridad: ['Tienes la prioridad', 'Puedes jugar un Juicio o activar una habilidad, o <b>pasar</b>. Cuando los dos pasan seguidos se resuelve la Cadena o avanza el juego.', { dom: '#btnPrimary' }],
+  asedio: ['Asedio', 'Un atacante con <b>Asedio</b> puede apuntar a un Ente de la Retaguardia rival. Si nadie lo bloquea, le hace su daño a ese Ente, que no devuelve el golpe.', null],
   lujuria: ['Lujuria', 'Al inicio de su turno, cada jugador mueve uno de sus Entes a la otra fila.', { kind: 'descenso', circle: 2 }],
 };
 
@@ -144,6 +147,7 @@ export class UI {
       closeMenu();
       if (!this.g || this.mode !== 'action') return this.toast('Úsalo cuando tengas la prioridad.');
       if (this.tutor && this.tutor.active) return this.toast('No disponible durante una lección.');
+      if (this.net) return this.toast('No disponible en partidas online.');
       if (this.g.circle >= 9) return this.toast('Ya estáis en el Noveno Círculo.');
       this.submit({ type: 'demoDescend' });
     }
@@ -312,7 +316,7 @@ export class UI {
       phaseTip: k => { if (this.g.active === 0) this.coach(k); },
       setPrompt: t => this.prompt(t),
       turnStart: A => { this.prompt(''); this.A.bell(A === 0 ? 523 : 392, 0.04, 1.5); this.banner(A === 0 ? 'TU TURNO' : 'TURNO DEL RIVAL', '', 'turn', 1300); },
-      announceFirst: async first => { await this.banner(first === 0 ? 'EMPIEZAS TÚ' : 'EMPIEZA EL RIVAL', 'Se decide al azar. El jugador inicial no roba en su primer turno y hace avanzar el Descenso al inicio de cada ronda.', '', 3000); },
+      announceFirst: async first => { await this.banner(first === 0 ? 'EMPIEZAS TÚ' : 'EMPIEZA EL RIVAL', 'Se decide al azar. El jugador inicial hace avanzar el Descenso al inicio de cada ronda. Los dos roban desde el primer turno.', '', 3000); },
       gameOver: e => this.gameOver(e),
       error: e => this.toast('Error: ' + e.message, 8000),
       event: (name, data, g) => { if (this.tutor && this.tutor.active) this.tutor.onEvent(name, data, g); if (name === 'draw' && data.pi === 0) this.updateHandTab(); },
@@ -410,8 +414,16 @@ export class UI {
     if (e.tempF) F.push(['este turno', e.tempF]); if (e.tempR) R.push(['este turno', e.tempR]);
     for (const r of e.attached) { if (r.def.equip.f) F.push([r.def.name, r.def.equip.f]); if (r.def.equip.r) R.push([r.def.name, r.def.equip.r]); }
     for (const s of p.rear) if (s && s.def.apoyo && e.def.senda === s.def.apoyo.senda) F.push([`Apoyo de ${s.def.name}`, s.def.apoyo.f]);
+    for (const s2 of p.rear) if (s2 && s2.def.aura && (!s2.def.aura.attacking || e.attacking)) { if (s2.def.aura.f) F.push([s2.def.name, s2.def.aura.f]); if (s2.def.aura.r) R.push([s2.def.name, s2.def.aura.r]); }
+    const sf = g.scaleOf(e, 'f'), sr = g.scaleOf(e, 'r'); if (sf) F.push([e.def.scale.per === 'oro' ? 'por tu Oro' : 'por tu Olvido', sf]); if (sr) R.push([e.def.scale.per === 'oro' ? 'por tu Oro' : 'por tu Olvido', sr]);
     if (g.circle === 5 && g.rowOf(e) === 'van') F.push(['Círculo V · Ira', 1]);
-    const cd = e.def.cond; if (cd && g.balance(e.ctrl).state === cd.state) { if (cd.f) F.push([cd.state === 'virtuoso' ? 'Virtuoso' : 'Corrupto', cd.f]); if (cd.r) R.push([cd.state === 'virtuoso' ? 'Virtuoso' : 'Corrupto', cd.r]); }
+    const cd = e.def.cond; const cdn = cd && ({ virtuoso: 'Virtuoso', corrupto: 'Corrupto', tibio: 'Tibio', destino: 'Destino', sinDestino: 'Sin Destino', circulo: 'Círculo', oro: 'Oro', olvido: 'Olvido' }[cd.if || cd.state]);
+    if (cd && g.condOk(e.ctrl, cd)) { if (cd.f) F.push([cdn, cd.f]); if (cd.r) R.push([cdn, cd.r]); }
+    const o = g.P[1 - e.ctrl];
+    if (p.destiny === 'caida' && p.pid === 'eneas' && p.gold > 0 && g.rowOf(e) === 'van') F.push(['Caída de Eneas', 1]);
+    if (p.destiny === 'redencion' && p.pid === 'farinata' && e.def.senda === 'ira') R.push(['Redención de Farinata', 1]);
+    if (p.destiny === 'redencion' && p.pid === 'dante' && g.hasKw(e, 'guardian')) R.push(['Redención de Dante', 2]);
+    if (o.destiny === 'caida' && o.pid === 'dante' && e.frozen) { F.push(['Caída de Dante', -1]); R.push(['Caída de Dante', -1]); }
     if (p.destiny === 'caida' && p.pid === 'francesca' && e.attacking) F.push(['Caída de Francesca', 1]);
     if (p.destiny === 'redencion' && p.pid === 'francesca' && g.rowOf(e) === 'van') R.push(['Redención de Francesca', 1]);
     return { F, R };
@@ -431,9 +443,11 @@ export class UI {
     if (g && c.soul && c.zone === 'souls') html += `<p class="dim">${c.faceDown ? 'Condenada: da energía, no aporta Senda.' : 'Absuelta: da energía y aporta su símbolo al umbral.'} ${c.tapped ? 'Agotada este turno.' : c.owner === 0 ? 'Clic para agotarla: +1 de energía.' : ''}</p>`;
     const terms = new Set(); const text = s ? d.text : d.text + ' ' + TYPES[d.type].name;
     for (const k of (d.kw || [])) terms.add(KEYWORDS[k].name);
-    if (d.cond) { terms.add(d.cond.state === 'virtuoso' ? 'Virtuoso' : 'Corrupto'); for (const k of d.cond.kw || []) terms.add(KEYWORDS[k].name); }
+    if (d.cond) { const cn = { virtuoso: 'Virtuoso', corrupto: 'Corrupto', tibio: 'Tibio', destino: 'Destino', sinDestino: 'Sin Destino', circulo: 'Círculo', oro: 'Oro', olvido: 'Olvido' }[d.cond.if || d.cond.state]; if (cn) terms.add(cn); for (const k of d.cond.kw || []) terms.add(KEYWORDS[k].name); }
     if (d.apoyo) terms.add('Apoyo'); if (d.onDeath) terms.add('Al morir'); if (d.onEnter) terms.add('Al entrar');
     if (/Descender/.test(text)) terms.add('Descender'); if (/Balanza/.test(text)) terms.add('Balanza');
+    if (/Sepultar/.test(text)) terms.add('Sepultar'); if (/Oro/.test(text)) terms.add('Oro'); if (/Sin Destino/.test(text)) terms.add('Sin Destino'); else if (/Destino/.test(text)) terms.add('Destino');
+    if (d.onAttack) terms.add('Al atacar'); if (d.onMove) terms.add('Al cambiar de fila'); if (/Olvido/.test(text)) terms.add('Olvido');
     if (!s) terms.add(TYPES[d.type].name); else { terms.add('Absolver'); terms.add('Condenar'); }
     html += `<div class="terms">${[...terms].filter(t => GLOSSARY[t]).map(t => `<p><b>${t}:</b> ${GLOSSARY[t]}</p>`).join('')}</div>`;
     if (g && c.owner === 0 && c.zone === 'hand') {
@@ -446,7 +460,7 @@ export class UI {
     const pv = $('#preview'); pv.innerHTML = ''; const inHand = c.owner === 0 && c.zone === 'hand';
     if (!inHand) { const img = h('div', 'pv-card'); img.appendChild(cloneCanvas(ART.cardFace(c.id))); pv.appendChild(img); }
     pv.appendChild(h('div', 'pv-info', this.cardInfoHTML(c)));
-    pv.classList.toggle('left', (this.mx || 0) > innerWidth * 0.5); pv.classList.toggle('hand', inHand); pv.classList.add('show');
+    pv.classList.remove('over'); pv.classList.toggle('left', (this.mx || 0) > innerWidth * 0.5); pv.classList.toggle('hand', inHand); pv.classList.add('show');
   }
   hidePreview() { $('#preview').classList.remove('show'); }
   inspect(info) {
@@ -491,7 +505,7 @@ export class UI {
       el.appendChild(grid);
     };
     el.appendChild(h('h3', '', 'Peregrinos')); const pg = h('div', 'gal wide');
-    for (const pid of ['francesca', 'virgilio']) { const f = h('figure'); f.appendChild(cloneCanvas(ART.pilgrimFace(pid))); f.appendChild(h('figcaption', '', PILGRIMS[pid].full)); pg.appendChild(f); }
+    for (const pid of PILGRIM_IDS) { const f = h('figure'); f.appendChild(cloneCanvas(ART.pilgrimFace(pid))); f.appendChild(h('figcaption', '', PILGRIMS[pid].full)); pg.appendChild(f); }
     el.appendChild(pg);
     for (const k of [...SENDA_KEYS, null]) add(k ? `Senda de ${SENDAS[k].name}` : 'Neutrales', Object.keys(CARDS).filter(id => CARDS[id].senda === k), false);
     add('Almas', Object.keys(SOULS), true);
@@ -610,7 +624,7 @@ export class UI {
       if (!r) return; act.attach = r;
     }
     if (d.target) {
-      const r = await this.pick(g.targets(0, d.target, d.type === 'juicio'), `<b>${d.name}</b>: elige objetivo — ${d.text.replace(/\*/g, '')}`, true, d.harm ? 0xff6a3a : 0xffd08a, src());
+      const r = await this.pick(g.targetsFor(0, d), `<b>${d.name}</b>: elige objetivo — ${d.text.replace(/\*/g, '')}`, true, d.harm ? 0xff6a3a : 0xffd08a, src());
       if (!r) return; act.targets = [r];
     }
     this.submit(act);
@@ -699,7 +713,7 @@ export class UI {
           const m = self.modal(`<div class="soul-choice"><h2>${d.name}</h2><p class="sub">Cada alma es un dilema. ¿Qué harás con ella?</p>
             <div class="sc-row">
               <div class="sc-opt gold ${lock === 'condemn' ? 'locked' : ''}" data-m="absolve"><div class="sc-h">${icon('halo', '#e8c070')} ABSOLVER</div>
-                <ul><li>Entra <b>boca arriba</b>.</li><li>Se agota para dar 1 de energía.</li><li>Aporta ${d.senda ? icon(d.senda) + ' <b>' + SENDAS[d.senda].name + '</b>' : '<b>ningún símbolo</b> (es neutral)'} a tu umbral.</li><li>Balanza → <b>Virtud</b>: ${b.abs + 1} / ${b.con} (<b>${after(b.diff + 1)}</b>).</li></ul></div>
+                <ul><li>Entra <b>boca arriba</b>.</li><li>Se agota para dar 1 de energía.</li><li>Aporta ${d.senda ? icon(d.senda) + ' <b>' + SENDAS[d.senda].name + '</b>' : '<b>ningún símbolo</b> (es neutral)'} a tu umbral.</li><li>Balanza → <b>Virtud</b>: ${b.abs + 1} / ${b.con} (<b>${after(b.diff + 1)}</b>).</li><li><b>Gracia:</b> tu Peregrino gana 1 de Voluntad.</li></ul></div>
               <div class="sc-card"></div>
               <div class="sc-opt ash ${lock === 'absolve' ? 'locked' : ''}" data-m="condemn"><div class="sc-h">${icon('horns', '#111')} CONDENAR</div>
                 <ul><li>Entra <b>boca abajo</b>.</li><li>Se agota para dar 1 de energía.</li><li><b>Condena ahora:</b> ${d.text}</li><li>No aporta Senda. Balanza → <b>Corrupción</b>: ${b.abs} / ${b.con + 1} (<b>${after(b.diff - 1)}</b>).</li></ul></div>
@@ -739,6 +753,12 @@ export class UI {
           if (!g.P[other].hand.length) o.innerHTML = '<p>No tiene cartas en la mano.</p>';
         });
       },
+      async chooseSiegeTarget(g, pi, uid, cands) {
+        await gate(); self.g = g; self.coach('asedio');
+        const a = g.find(uid);
+        const r = await self.pick(cands, `<b>Asedio</b> — ${a.def.name}: ¿atacas al Peregrino rival o a un Ente de su Retaguardia?`, false, 0xff6a3a, self.V.worldPos(uid));
+        return r || cands[0];
+      },
       async chooseAttackers(g, pi, cands, mandatory) {
         await gate(); self.g = g;
         return new Promise(res => {
@@ -755,7 +775,7 @@ export class UI {
             self.V.sync(300);
           };
           self.atkUpd = upd; upd();
-          self.prompt(`<b>Declarar atacantes:</b> haz clic en tus Entes de Vanguardia. Todos atacan al Peregrino rival.${mandatory.length ? ' Los que tienen <b>Ira ciega</b> deben atacar.' : ''}`);
+          self.prompt(`<b>Declarar atacantes:</b> haz clic en tus Entes de Vanguardia. Atacan al Peregrino rival (los que tienen <b>Asedio</b> podrán elegir un Ente de su Retaguardia).${mandatory.length ? ' Los que tienen <b>Ira ciega</b> deben atacar.' : ''}`);
         });
       },
       async chooseBlocks(g, pi, attackers, cands) {
@@ -833,7 +853,7 @@ export class UI {
       <ul class="endings"><li class="${e.reason === 'voluntad' ? 'on' : ''}"><b>Derrota del Peregrino:</b> su Voluntad llega a 0.</li>
       <li class="${e.reason === 'agotamiento' ? 'on' : ''}"><b>Agotamiento:</b> debes robar y no quedan cartas en ninguno de tus dos mazos.</li>
       <li class="${e.reason === 'juicioFinal' ? 'on' : ''}"><b>Juicio Final:</b> tras la ronda del Círculo IX gana más Voluntad; en empate, quien esté más lejos del centro de la Balanza (el tibio pierde); si no, tablas.</li></ul></div>`,
-      tut ? [['Continuar ▸', () => { this.closeModal(); this.tutor.onEvent('gameOver', e, g); }]] : [['Jugar otra vez', () => location.reload()], ['Abrir el Códice', () => this.openCodex('victoria'), 'ghost']], 'over');
+      tut ? [['Continuar ▸', () => { this.closeModal(); this.tutor.onEvent('gameOver', e, g); }]] : [['Volver al menú', () => location.reload()], ['Informe de playtest (GitHub)', () => this.recorder && window.open(STATS.issueURL(this.recorder.r), '_blank'), 'ghost'], ['Descargar datos', () => this.recorder && STATS.downloadJSON(this.recorder.r, `sulphur-partida-${this.recorder.r.id}.json`), 'ghost']], 'over');
     this.A.judgment();
   }
 
@@ -842,13 +862,15 @@ export class UI {
     return new Promise(res => {
       const m = $('#modal'); m.className = 'show title';
       m.innerHTML = `<div class="title-screen"><div class="title-logo"><img class="tl-glow" src="assets/mark-white.png" alt=""><img class="tl-mark" src="assets/mark-light.png" alt=""></div>
-        <h1><img src="assets/word-light.png" alt="SULPHUR"></h1><p class="tagline">Un juego de cartas 1 contra 1 en el Infierno de Dante</p>
+        <h1><img src="assets/word-light.png" alt="SULPHUR"></h1><p class="tagline">Un juego de cartas 1 contra 1 en el Infierno de Dante · <span class="alpha">set alpha</span></p>
         <p class="pitch">Cada alma puede ser absuelta o condenada. Desciende por los nueve Círculos, inclina tu Balanza y llega al Juicio.</p>
-        <div class="t-btns"><button class="btn big" data-t="learn">Aprender a jugar<small>4 lecciones guiadas</small></button><button class="btn big alt" data-t="play">Partida libre<small>contra un rival de práctica</small></button><button class="btn ghost" data-t="codex">Códice: reglas y arte</button></div>
-        <p class="fine">Demo basada íntegramente en «Núcleo de reglas» y «Dirección artística».</p></div>`;
+        <div class="t-btns"><button class="btn big" data-t="learn">Aprender a jugar<small>4 lecciones guiadas</small></button><button class="btn big alt" data-t="play">Partida contra la IA<small>3 niveles de dificultad</small></button><button class="btn big online" data-t="online">Multijugador<small>juega con un amigo</small></button></div>
+        <div class="t-btns"><button class="btn ghost" data-t="decks">Constructor de mazos</button><button class="btn ghost" data-t="stats">Datos del playtest</button><button class="btn ghost" data-t="codex">Códice: reglas y arte</button></div>
+        <p class="fine">Basada en «Núcleo de reglas» y «Dirección artística» · Alpha pool: 100 cartas, 18 Almas, 7 Peregrinos.</p></div>`;
       m.querySelectorAll('[data-t]').forEach(b => b.onclick = () => {
         this.A.start(); this.A.click(); const t = b.dataset.t;
         if (t === 'codex') { this.openCodex(); const obs = setInterval(() => { if (!$('#modal').classList.contains('show')) { clearInterval(obs); this.title().then(res); } }, 300); return; }
+        if (t === 'stats') { this.statsPanel().then(() => this.title().then(res)); return; }
         res(t);
       });
     });
@@ -858,21 +880,121 @@ export class UI {
       const m = $('#modal'); m.className = 'show select';
       m.innerHTML = `<div class="lessons"><h2>Aprender a jugar</h2><p class="sub">Cuatro lecciones cortas en escenarios preparados. La voz del Libro te guía paso a paso; tú juegas cada acción.</p>
         <div class="ls">${lessons.map((l, i) => `<button class="ls-it ${done.includes(l.id) ? 'done' : ''}" data-i="${i}"><span class="ls-n">${['I', 'II', 'III', 'IV'][i]}</span><span class="ls-t"><b>${l.title}</b><small>${l.sub}</small></span><span class="ls-s">${done.includes(l.id) ? '✦ Completada' : 'Empezar ▸'}</span></button>`).join('')}</div>
-        <div class="t-btns"><button class="btn alt" data-x="play">Partida libre ▸</button><button class="btn ghost" data-x="back">Volver a la portada</button></div></div>`;
+        <div class="t-btns"><button class="btn alt" data-x="play">Partida contra la IA ▸</button><button class="btn ghost" data-x="back">Volver a la portada</button></div></div>`;
       m.querySelectorAll('.ls-it').forEach(b => b.onclick = () => { this.A.click(); this.closeModal(); res({ lesson: +b.dataset.i }); });
       m.querySelectorAll('[data-x]').forEach(b => b.onclick = () => { this.A.click(); this.closeModal(); res({ go: b.dataset.x }); });
     });
   }
-  choosePilgrim() {
+  pilgrimCardsHTML(sel) {
+    return PILGRIM_IDS.map(pid => { const P = PILGRIMS[pid]; return `<button class="pc ${pid === sel ? 'on' : ''}" data-p="${pid}"><canvas></canvas><b>${P.name}</b><span>${P.sendas.map(s2 => icon(s2)).join('')} <i>${P.style}</i></span></button>`; }).join('');
+  }
+  fillPilgrimCanvases(root) { root.querySelectorAll('.pc[data-p] canvas').forEach(c => { const pid = c.parentElement.dataset.p; const src = ART.pilgrimPortrait(pid); c.width = src.width; c.height = src.height; c.getContext('2d').drawImage(src, 0, 0); }); }
+  pilgrimInfo(pid) { const P = PILGRIMS[pid]; return `<h3>${P.full}</h3><p class="tag">${P.sendas.map(s2 => icon(s2) + ' ' + SENDAS[s2].name).join(' · ')} · Voluntad ${P.will}</p><p>${P.blurb}</p><p class="dim">Habilidad base: ${P.ability.text}<br>${icon('halo', '#c9a13a')} Redención: ${P.redencion.text}<br>${icon('horns', '#222')} Caída: ${P.caida.text}</p>`; }
+  // Preparación de partida: tu Peregrino y mazo, el rival (aleatorio o elegido) y el nivel.
+  setupScreen(opts = {}) {
     return new Promise(res => {
       const m = $('#modal'); m.className = 'show select';
-      const card = pid => { const P = PILGRIMS[pid];
-        return `<div class="pil" data-p="${pid}"><div class="pil-c"></div><div class="pil-t"><h3>${P.full}</h3><p class="tag">${P.sendas.map(s => icon(s) + ' ' + SENDAS[s].name).join(' · ')} · Voluntad ${P.will}</p><p>${P.blurb}</p>
-        <p class="dim">Habilidad base: ${P.ability.text}<br>${icon('halo', '#c9a13a')} Redención: ${P.redencion.text}<br>${icon('horns', '#222')} Caída: ${P.caida.text}</p><button class="btn">Elegir a ${P.name}</button></div></div>`; };
-      m.innerHTML = `<div class="select-screen"><h2>Elige tu Peregrino</h2><p class="sub">Tu líder y tu identidad: define tus Sendas, tiene 20 de Voluntad y no ataca ni bloquea. El rival llevará al otro.</p>
-        <div class="pils">${card('francesca')}${card('virgilio')}</div><p class="locked">Otros Peregrinos del documento, no jugables en esta demo: Dante · Eneas · Farinata · Ulises</p></div>`;
-      for (const pid of ['francesca', 'virgilio']) $(`[data-p="${pid}"] .pil-c`, m).appendChild(cloneCanvas(ART.pilgrimFace(pid)));
-      m.querySelectorAll('.pil').forEach(p => p.onclick = () => { this.A.click(); this.closeModal(); res(p.dataset.p); });
+      const st = { pid: 'francesca', deck: 'sug', rival: 'random', level: 'normal' };
+      m.innerHTML = `<div class="setup"><h2>${opts.online ? 'Tu Peregrino para la partida online' : 'Partida contra la IA'}</h2>
+        <div class="su-sec"><div class="su-h">Tu Peregrino</div><div class="pcs mine">${this.pilgrimCardsHTML(st.pid)}</div><div class="su-info mine-info"></div>
+          <div class="su-row"><label>Mazo</label><select class="su-deck"></select><button class="btn ghost" data-x="decks">Constructor de mazos</button></div></div>
+        ${opts.online ? '' : `<div class="su-sec"><div class="su-h">Rival</div><div class="su-row"><button class="su-t on" data-r="random">🎲 Aleatorio</button><button class="su-t" data-r="choose">Elegir Peregrino</button></div>
+          <div class="pcs rival hidden">${this.pilgrimCardsHTML('virgilio')}</div>
+          <div class="su-row"><label>Nivel</label>${[['facil', 'Fácil', 'juega sin plan y casi no responde'], ['normal', 'Normal', 'juega bien sus cartas'], ['dificil', 'Difícil', 'calcula el combate, busca letales y guarda respuestas']].map(([k, n, d]) => `<button class="su-l ${k === st.level ? 'on' : ''}" data-l="${k}" title="${d}">${n}</button>`).join('')}</div></div>`}
+        <div class="t-btns"><button class="btn big" data-x="go">${opts.online ? 'Continuar ▸' : 'Descender ▸'}</button><button class="btn ghost" data-x="back">Volver</button></div></div>`;
+      this.fillPilgrimCanvases(m);
+      const refresh = () => {
+        m.querySelectorAll('.mine .pc').forEach(b => b.classList.toggle('on', b.dataset.p === st.pid));
+        $('.mine-info', m).innerHTML = this.pilgrimInfo(st.pid);
+        const opts2 = deckOptions(st.pid); if (!opts2.some(o => o.key === st.deck)) st.deck = 'sug';
+        $('.su-deck', m).innerHTML = opts2.map(o => `<option value="${o.key}" ${o.key === st.deck ? 'selected' : ''}>${o.name}</option>`).join('');
+        if (!opts.online) {
+          m.querySelectorAll('.su-t').forEach(b => b.classList.toggle('on', b.dataset.r === (st.rival === 'random' ? 'random' : 'choose')));
+          $('.pcs.rival', m).classList.toggle('hidden', st.rival === 'random');
+          m.querySelectorAll('.rival .pc').forEach(b => b.classList.toggle('on', b.dataset.p === st.rival));
+          m.querySelectorAll('.su-l').forEach(b => b.classList.toggle('on', b.dataset.l === st.level));
+        }
+      };
+      m.querySelectorAll('.mine .pc').forEach(b => b.onclick = () => { this.A.click(); st.pid = b.dataset.p; refresh(); });
+      m.querySelectorAll('.rival .pc').forEach(b => b.onclick = () => { this.A.click(); st.rival = b.dataset.p; refresh(); });
+      m.querySelectorAll('.su-t').forEach(b => b.onclick = () => { st.rival = b.dataset.r === 'random' ? 'random' : 'virgilio'; refresh(); });
+      m.querySelectorAll('.su-l').forEach(b => b.onclick = () => { st.level = b.dataset.l; refresh(); });
+      $('.su-deck', m).onchange = e => { st.deck = e.target.value; };
+      m.querySelectorAll('[data-x]').forEach(b => b.onclick = () => {
+        this.A.click(); const x = b.dataset.x;
+        if (x === 'back') { this.closeModal(); res(null); }
+        if (x === 'decks') { this.closeModal(); res({ go: 'decks' }); }
+        if (x === 'go') {
+          const deck = deckOptions(st.pid).find(o => o.key === st.deck).deck;
+          const rivalPid = st.rival === 'random' ? PILGRIM_IDS[Math.floor(Math.random() * PILGRIM_IDS.length)] : st.rival;
+          this.closeModal(); res({ pid: st.pid, deck, rivalPid, level: st.level, deckName: $('.su-deck', m) ? $('.su-deck', m).selectedOptions[0].textContent : '' });
+        }
+      });
+      refresh();
     });
+  }
+  // Sala online: crear (muestra el código) o unirse con un código.
+  lobby(net, mine) {
+    return new Promise(res => {
+      const m = $('#modal'); m.className = 'show select';
+      m.innerHTML = `<div class="lobby"><h2>Multijugador</h2><p class="sub">Partida 1 contra 1 con un amigo, directa entre vuestros navegadores. Uno crea la sala y le pasa el código al otro.</p>
+        <div class="lb-cols"><div class="lb-col"><h3>Crear sala</h3><button class="btn big" data-l="host">Crear sala</button><div class="lb-code"></div></div>
+        <div class="lb-col"><h3>Unirse</h3><input class="lb-in" maxlength="5" placeholder="CÓDIGO"><button class="btn big alt" data-l="join">Unirse</button></div></div>
+        <div class="lb-status"></div><div class="t-btns"><button class="btn ghost" data-l="back">Volver</button></div></div>`;
+      const status = t => { $('.lb-status', m).innerHTML = t; };
+      m.querySelector('[data-l="back"]').onclick = () => { net.close(); this.closeModal(); res(null); };
+      m.querySelector('[data-l="host"]').onclick = async () => {
+        status('Creando sala…');
+        try { const c = await net.host(); $('.lb-code', m).innerHTML = `<div class="code">${c}</div><p>Pásale este código a tu amigo. Esperando a que se una…</p>`; status(''); net.on('connected', () => { status('¡Conectado! Preparando la partida…'); res('host'); }); }
+        catch (e) { status('No se pudo crear la sala: ' + (e.type || e.message)); }
+      };
+      m.querySelector('[data-l="join"]').onclick = async () => {
+        const c = $('.lb-in', m).value.trim(); if (c.length < 5) return status('Escribe el código de 5 letras.');
+        status('Conectando…');
+        try { await net.join(c); status('¡Conectado! Esperando al anfitrión…'); res('guest'); }
+        catch (e) { status('No se pudo conectar: ' + (e.type === 'peer-unavailable' ? 'esa sala no existe o ya ha empezado.' : (e.type || e.message))); }
+      };
+    });
+  }
+  waitingRemote(on, m) {
+    if (!on) return;
+    const what = { chooseDrawDeck: 'está robando', chooseSoulMode: 'decide si absolver o condenar', chooseTarget: 'elige un objetivo', chooseAttackers: 'declara sus atacantes', chooseBlocks: 'declara sus bloqueos', chooseSiegeTarget: 'elige el objetivo de su Asedio', chooseDiscard: 'está descartando', chooseOrder: 'ordena sus cartas', chooseLujuria: 'mueve un Ente (Lujuria)' }[m] || 'tiene la prioridad';
+    this.prompt(`Tu rival ${what}…`); this.setButtons(); $('#btnPrimary').innerHTML = 'Esperando al rival…';
+  }
+  statsPanel() {
+    return new Promise(res => {
+      const draw = () => {
+        const S = STATS.summary(); const pct = x => (x * 100).toFixed(0) + '%';
+        const rows = Object.entries(S.byPilgrim).sort((a, b) => b[1].w / b[1].g - a[1].w / a[1].g).map(([pid, b]) => `<tr><td>${PILGRIMS[pid].name}</td><td>${b.g}</td><td><b>${pct(b.w / b.g)}</b></td><td>${pct(b.d / b.g)}</td></tr>`).join('');
+        const m = this.modal(`<div class="statsp"><h2>Datos del playtest</h2><p class="sub">Cada partida jugada en este navegador (contra la IA, online o simulada) queda registrada. Expórtalos y compártelos para equilibrar el juego.</p>
+          <div class="sp-kpis"><div><b>${S.n}</b><span>partidas</span></div><div><b>${S.avgRounds.toFixed(1)}</b><span>rondas de media</span></div><div><b>${pct(S.finalJudgment)}</b><span>llegan al Juicio Final</span></div><div><b>${pct(S.destinyRate)}</b><span>alcanzan su Destino</span></div><div><b>${pct(S.absolveRatio)}</b><span>de Almas absueltas</span></div></div>
+          ${rows ? `<table><tr><th>Peregrino</th><th>Partidas</th><th>Victorias</th><th>Destino</th></tr>${rows}</table>` : '<p class="dim">Aún no hay partidas registradas.</p>'}
+          ${S.topCards.length ? `<h3>Cartas más jugadas</h3><p>${S.topCards.map(([n, k]) => `${n} <span class="dim">(${k})</span>`).join(' · ')}</p>` : ''}
+          <h3>Simular partidas IA contra IA</h3><div class="sp-sim"><select class="sa">${PILGRIM_IDS.map(p2 => `<option value="${p2}">${PILGRIMS[p2].name}</option>`).join('')}</select> contra <select class="sb">${PILGRIM_IDS.map(p2 => `<option value="${p2}" ${p2 === 'virgilio' ? 'selected' : ''}>${PILGRIMS[p2].name}</option>`).join('')}</select>
+          <select class="sl"><option value="dificil">Difícil</option><option value="normal">Normal</option><option value="facil">Fácil</option></select> <select class="sn"><option>20</option><option>50</option><option>100</option></select> partidas <button class="btn" data-s="sim">Simular</button><span class="sp-prog"></span></div></div>`,
+          [['Exportar JSON', () => STATS.downloadJSON(STATS.loadAll(), 'sulphur-playtest.json'), 'ghost'], ['Borrar datos', async () => { if (await this.ask('¿Borrar todos los datos registrados?')) { STATS.clearAll(); draw(); } }, 'ghost'], ['Cerrar', () => { this.closeModal(); res(); }]], 'wide stats');
+        $('[data-s="sim"]', m).onclick = async () => {
+          const a = $('.sa', m).value, b = $('.sb', m).value, lv = $('.sl', m).value, n = +$('.sn', m).value;
+          const games = await STATS.simulate({ a, b, levelA: lv, levelB: lv, n, onProgress: (i, t) => { $('.sp-prog', m).textContent = ` ${i}/${t}…`; } });
+          const wa = games.filter(g2 => g2.winner != null && g2.pilgrims[g2.winner] === a).length;
+          this.toast(`${PILGRIMS[a].name} ganó ${wa} de ${games.length} contra ${PILGRIMS[b].name}.`, 4000); draw();
+        };
+      };
+      draw();
+    });
+  }
+  askText(label, value = '') {
+    return new Promise(res => {
+      const d = $('#confirm'); d.innerHTML = `<div class="cf-box"><p>${label}</p><textarea class="cf-in" rows="3">${value}</textarea><div class="cf-btns"><button class="btn" data-y>Aceptar</button><button class="btn ghost" data-n>Cancelar</button></div></div>`;
+      d.classList.add('show'); const inp = $('.cf-in', d); inp.focus(); inp.select();
+      const close = v => { d.classList.remove('show'); res(v); };
+      $('[data-y]', d).onclick = () => close(inp.value.trim()); $('[data-n]', d).onclick = () => close(null);
+    });
+  }
+  previewDef(id) {
+    const isSoul = !!SOULS[id] && !CARDS[id]; const fake = { id, def: isSoul ? SOULS[id] : CARDS[id], soul: isSoul, zone: 'gallery', owner: 1 };
+    const g = this.g; this.g = null; const html = this.cardInfoHTML(fake); this.g = g;
+    const pv = $('#preview'); pv.innerHTML = ''; const img = h('div', 'pv-card'); img.appendChild(cloneCanvas(ART.cardFace(id))); pv.appendChild(img); pv.appendChild(h('div', 'pv-info', html));
+    pv.classList.remove('hand'); pv.classList.add('over'); pv.classList.toggle('left', (this.mx || 0) > innerWidth * 0.5); pv.classList.add('show');
   }
 }

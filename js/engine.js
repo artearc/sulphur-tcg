@@ -1,75 +1,87 @@
-// SULPHUR — motor de reglas (Núcleo de reglas, temporada 1).
-import { CARDS, SOULS, PILGRIMS, CIRCLES, KEYWORDS, SENDAS, buildDeckList } from './data.js';
+// SULPHUR — motor de reglas (Núcleo de reglas + cambios del set alpha).
+// Alpha: el jugador inicial roba · Gracia (absolver da 1 de Voluntad) · Asedio · Sepultar ·
+// disparadores al atacar / al cambiar de fila / al morir un aliado · condiciones de Destino y de Círculo · Oro.
+import { CARDS, SOULS, PILGRIMS, CIRCLES, KEYWORDS, SENDAS, buildDeckList, suggestedDeck } from './data.js';
 
 export class GameEnd {
   constructor(winner, reason, detail) { this.winner = winner; this.reason = reason; this.detail = detail; }
 }
-
-let UID = 1;
-function mkInst(id, owner, isSoul) {
+export function seededRng(seed) {
+  let a = (seed >>> 0) || 1;
+  return () => { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; };
+}
+function shuffle(a, rnd) { for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(rnd() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; }
+function mkInst(id, owner, isSoul, uid) {
   return {
-    uid: UID++, id, def: isSoul ? SOULS[id] : CARDS[id], soul: !!isSoul, owner, ctrl: owner,
+    uid, id, def: isSoul ? SOULS[id] : CARDS[id], soul: !!isSoul, owner, ctrl: owner,
     tapped: false, sick: false, damage: 0, moved: false, tempF: 0, tempR: 0, permF: 0, permR: 0,
-    frozen: false, protectedFrom: null, attacking: false, blockedBy: null, blocking: null, wasBlocked: false,
+    frozen: false, protectedFrom: null, attacking: false, blockedBy: null, blocking: null, wasBlocked: false, siege: null,
     faceDown: false, attached: [], attachedTo: null, zone: isSoul ? 'soulDeck' : 'main',
   };
 }
-function shuffle(a) { for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; }
-function mkPlayer(idx, pid, isAI) {
-  const P = PILGRIMS[pid];
-  const p = {
-    idx, pid, pilgrim: P, isAI, name: isAI ? 'Rival' : 'Tú', will: P.will,
-    main: shuffle(buildDeckList(P.deck).map(id => mkInst(id, idx, false))),
-    soulDeck: shuffle(buildDeckList(P.souls).map(id => mkInst(id, idx, true))),
-    hand: [], van: Array(5).fill(null), rear: Array(3).fill(null), souls: [], olvido: [], burned: [], relics: [],
-    pool: 0, gold: 0, soulPlayed: false, abilityUsed: false, destiny: null, lastState: 'tibio',
-  };
-  return p;
-}
 export const isEnte = c => c && c.def && (c.def.type === 'ente' || c.def.type === 'ilustre');
+const isEnteDef = c => c && c.def && (c.def.type === 'ente' || c.def.type === 'ilustre');
 const wait = ms => new Promise(r => setTimeout(r, ms));
+const clean = t => (t || '').replace(/\*/g, '').replace(/\{[a-z]+\}/g, '').trim();
 
 export class Game {
-  constructor({ humanPid, aiPid, io, view, hooks }) {
-    this.P = [mkPlayer(0, humanPid, false), mkPlayer(1, aiPid, true)];
+  // decks: [{main, souls}, …] (por defecto, el mazo sugerido) · seats: asientos absolutos (online) · seed: barajado reproducible
+  constructor({ humanPid, aiPid, io, view, hooks, decks, seed, seats, first, fast }) {
+    this.fast = !!fast;
+    this.seed = seed != null ? seed : Math.floor(Math.random() * 2 ** 31);
+    this.seats = seats || [0, 1];
+    this.forcedFirst = first;
+    this.P = [this.mkPlayer(0, humanPid, false, decks && decks[0]), this.mkPlayer(1, aiPid, true, decks && decks[1])];
     this.io = io; this.V = view; this.H = hooks;
     this.chain = []; this.chainId = 1; this.pending = [];
     this.circle = 1; this.round = 0; this.turn = 0; this.active = 0; this.first = 0; this.priority = null;
-    this.phase = 'setup'; this.step = null; this.windowLabel = ''; this.turnOf = [0, 0];
+    this.phase = 'setup'; this.step = null; this.windowLabel = ''; this.turnOf = [0, 0]; this.fog = [false, false];
     this.over = null;
+  }
+  mkPlayer(idx, pid, isAI, deck) {
+    const P = PILGRIMS[pid]; const d = deck || suggestedDeck(pid); const seat = this.seats[idx];
+    const rnd = seededRng(this.seed + seat * 7919 + 13); let uid = seat * 5000 + 1;
+    const mk = (id, soul) => mkInst(id, idx, soul, uid++);
+    return {
+      idx, pid, pilgrim: P, isAI, name: isAI ? 'Rival' : 'Tú', will: P.will, seat,
+      main: shuffle(buildDeckList(d.main).map(id => mk(id, false)), rnd),
+      soulDeck: shuffle(buildDeckList(d.souls).map(id => mk(id, true)), rnd),
+      hand: [], van: Array(5).fill(null), rear: Array(3).fill(null), souls: [], olvido: [], burned: [], relics: [],
+      pool: 0, gold: 0, soulPlayed: false, abilityUsed: false, destiny: null, lastState: 'tibio', nextUid: () => uid++,
+    };
   }
 
   // ───────────── consultas ─────────────
   log(t, cls) { this.H.log(t, cls); }
+  pause(ms) { return this.fast ? Promise.resolve() : wait(ms); }
   ev(name, data = {}) { if (this.H.event) this.H.event(name, data, this); }
   checkAbort() { if (this.aborted) throw new GameEnd(null, 'abort', ''); }
   setPhase(ph) { this.phase = ph; this.H.update(); this.ev('phase', { phase: ph, active: this.active }); }
-
-  // Escenario preparado (lecciones del tutorial): estado inicial concreto y mazos apilados.
   loadScenario(s) {
     this.circle = s.circle || 1; this.round = s.round || 0; this.first = s.first || 0; this.active = s.active != null ? s.active : this.first;
     this.turnOf = s.turnOf || [0, 0];
     s.players.forEach((sp, pi) => {
       const p = this.P[pi];
-      const mk = id => mkInst(id, pi, !CARDS[id]);
+      const mk = (id, soul) => mkInst(id, pi, soul != null ? soul : !CARDS[id], p.nextUid());
       if (sp.will != null) p.will = sp.will;
       p.hand = (sp.hand || []).map(id => Object.assign(mk(id), { zone: 'hand' }));
-      p.souls = (sp.souls || []).map(x => Object.assign(mkInst(x.id, pi, true), { zone: 'souls', faceDown: !!x.down, tapped: !!x.tapped }));
+      p.souls = (sp.souls || []).map(x => Object.assign(mk(x.id, true), { zone: 'souls', faceDown: !!x.down, tapped: !!x.tapped }));
       p.van = Array(5).fill(null); p.rear = Array(3).fill(null);
       (sp.van || []).forEach((id, i) => { if (id) p.van[i] = Object.assign(mk(id), { zone: 'van' }); });
       (sp.rear || []).forEach((id, i) => { if (id) p.rear[i] = Object.assign(mk(id), { zone: 'rear' }); });
-      if (sp.main) p.main = [...sp.main].reverse().map(id => mk(id));
-      if (sp.soulDeck) p.soulDeck = [...sp.soulDeck].reverse().map(id => mkInst(id, pi, true));
+      if (sp.main) p.main = [...sp.main].reverse().map(id => mk(id, false));
+      if (sp.soulDeck) p.soulDeck = [...sp.soulDeck].reverse().map(id => mk(id, true));
       if (sp.destiny) p.destiny = sp.destiny;
       p.lastState = this.balance(pi).state;
     });
   }
   async runScenario() {
-    try { while (true) await this.takeTurn(); }
-    catch (e) {
-      if (e instanceof GameEnd) { if (e.reason === 'abort') return; this.over = e; this.phase = 'over'; await this.V.sync(); await this.H.gameOver(e); }
-      else { console.error(e); this.H.error(e); }
-    }
+    try { this.ev('gameStart', { scenario: true }); while (true) await this.takeTurn(); }
+    catch (e) { await this.handleEnd(e); }
+  }
+  async handleEnd(e) {
+    if (e instanceof GameEnd) { if (e.reason === 'abort') return; this.over = e; this.phase = 'over'; this.ev('gameOver', { winner: e.winner, reason: e.reason }); await this.V.sync(); await this.H.gameOver(e); }
+    else { console.error(e); this.H.error(e); }
   }
   entes(pi) { const p = this.P[pi]; return [...p.van, ...p.rear].filter(isEnte); }
   allEntes() { return [...this.entes(this.active), ...this.entes(1 - this.active)]; }
@@ -87,6 +99,18 @@ export class Game {
     const p = this.P[pi]; const abs = p.souls.filter(s => !s.faceDown).length; const con = p.souls.length - abs; const diff = abs - con;
     const state = diff >= 3 ? 'virtuoso' : diff <= -3 ? 'corrupto' : 'tibio';
     return { abs, con, diff, state };
+  }
+  condOk(pi, c) {
+    if (!c) return false; const p = this.P[pi]; const k = c.if || c.state;
+    switch (k) {
+      case 'virtuoso': case 'corrupto': case 'tibio': return this.balance(pi).state === k;
+      case 'destino': return !!p.destiny;
+      case 'sinDestino': return !p.destiny;
+      case 'circulo': return this.circle >= c.n;
+      case 'oro': return p.gold > 0;
+      case 'olvido': return p.olvido.length >= c.n;
+    }
+    return false;
   }
   symbols(pi) {
     const p = this.P[pi]; const s = { ira: 0, gula: 0, avaricia: 0, fraude: 0, traicion: 0 };
@@ -120,25 +144,43 @@ export class Game {
     const g = Math.min(p.gold, rem); p.gold -= g; rem -= g;
     return tapped;
   }
+  scaleOf(e, key) {
+    const s = e.def.scale; if (!s || !s[key]) return 0; const p = this.P[e.ctrl];
+    let n = s.per === 'oro' ? p.gold : s.per === 'olvidoEntes' ? p.olvido.filter(isEnteDef).length : 0;
+    n = Math.floor(n / (s.div || 1)); return Math.min(s.max || 99, n) * s[key];
+  }
+  // Fuerza y Resistencia actuales (base + permanentes + turno + Reliquias + Apoyo/auras + Círculo + condiciones + Peregrinos).
   force(e) {
-    const p = this.P[e.ctrl]; let f = e.def.f + e.permF + e.tempF;
+    const p = this.P[e.ctrl], o = this.P[1 - e.ctrl]; let f = e.def.f + e.permF + e.tempF;
     for (const r of e.attached) if (r.def.equip && r.def.equip.f) f += r.def.equip.f;
-    for (const s of p.rear) if (s && s.def.apoyo && e.def.senda === s.def.apoyo.senda) f += s.def.apoyo.f;
+    for (const s of p.rear) {
+      if (!s) continue;
+      if (s.def.apoyo && e.def.senda === s.def.apoyo.senda) f += s.def.apoyo.f;
+      if (s.def.aura && (!s.def.aura.attacking || e.attacking)) f += s.def.aura.f || 0;
+    }
     if (this.circle === 5 && this.rowOf(e) === 'van') f += 1;
-    const cd = e.def.cond; if (cd && this.balance(e.ctrl).state === cd.state) f += cd.f || 0;
+    const cd = e.def.cond; if (cd && this.condOk(e.ctrl, cd)) f += cd.f || 0;
+    f += this.scaleOf(e, 'f');
     if (p.destiny === 'caida' && p.pid === 'francesca' && e.attacking) f += 1;
+    if (p.destiny === 'caida' && p.pid === 'eneas' && p.gold > 0 && this.rowOf(e) === 'van') f += 1;
+    if (o.destiny === 'caida' && o.pid === 'dante' && e.frozen) f -= 1;
     return Math.max(0, f);
   }
   res(e) {
-    const p = this.P[e.ctrl]; let r = e.def.r + e.permR + e.tempR;
+    const p = this.P[e.ctrl], o = this.P[1 - e.ctrl]; let r = e.def.r + e.permR + e.tempR;
     for (const x of e.attached) if (x.def.equip && x.def.equip.r) r += x.def.equip.r;
-    const cd = e.def.cond; if (cd && this.balance(e.ctrl).state === cd.state) r += cd.r || 0;
+    for (const s of p.rear) if (s && s.def.aura && s.def.aura.r && (!s.def.aura.attacking || e.attacking)) r += s.def.aura.r;
+    const cd = e.def.cond; if (cd && this.condOk(e.ctrl, cd)) r += cd.r || 0;
+    r += this.scaleOf(e, 'r');
     if (p.destiny === 'redencion' && p.pid === 'francesca' && this.rowOf(e) === 'van') r += 1;
+    if (p.destiny === 'redencion' && p.pid === 'farinata' && e.def.senda === 'ira') r += 1;
+    if (p.destiny === 'redencion' && p.pid === 'dante' && this.hasKw(e, 'guardian')) r += 2;
+    if (o.destiny === 'caida' && o.pid === 'dante' && e.frozen) r -= 1;
     return r;
   }
   hasKw(e, k) {
     if ((e.def.kw || []).includes(k)) return true;
-    const cd = e.def.cond; if (cd && cd.kw && cd.kw.includes(k) && this.balance(e.ctrl).state === cd.state) return true;
+    const cd = e.def.cond; if (cd && cd.kw && cd.kw.includes(k) && this.condOk(e.ctrl, cd)) return true;
     for (const r of e.attached) if (r.def.equip && r.def.equip.kw && r.def.equip.kw.includes(k)) return true;
     return false;
   }
@@ -146,11 +188,12 @@ export class Game {
   noCombat(e) { return e.attached.some(r => r.def.equip && r.def.equip.noCombat); }
   freeSlots(pi, row) { const arr = this.P[pi][row]; const out = []; arr.forEach((c, i) => { if (!c) out.push(i); }); return out; }
   targetable(e, casterPi, isJuicio) { return !(isJuicio && e.protectedFrom === casterPi); }
+  passFilter(e, f) { if (!f) return true; if (f.maxF != null && this.force(e) > f.maxF) return false; return true; }
 
-  targets(pi, spec, isJuicio, src) {
+  targets(pi, spec, isJuicio, src, filter) {
     const own = this.entes(pi), enemy = this.entes(1 - pi);
     const card = e => ({ kind: 'card', uid: e.uid });
-    const ok = e => this.targetable(e, pi, isJuicio);
+    const ok = e => this.targetable(e, pi, isJuicio) && this.passFilter(e, filter);
     switch (spec) {
       case 'ente': return [...own, ...enemy].filter(ok).map(card);
       case 'ownEnte': return own.filter(ok).map(card);
@@ -158,11 +201,14 @@ export class Game {
       case 'otherOwnEnte': return own.filter(e => e !== src).map(card);
       case 'anyEnte': return [...own, ...enemy].map(card);
       case 'attacker': return [...own, ...enemy].filter(e => e.attacking && ok(e)).map(card);
+      case 'combatEnte': return [...own, ...enemy].filter(e => (e.attacking || e.blocking) && ok(e)).map(card);
       case 'chainJuicio': return this.chain.filter(it => it.kind === 'spell' && it.card.def.type === 'juicio' && it.ctrl !== pi).map(it => ({ kind: 'chain', id: it.id }));
+      case 'chainAny': return this.chain.filter(it => it.ctrl !== pi && (it.kind !== 'spell' || it.card.def.type === 'juicio')).map(it => ({ kind: 'chain', id: it.id }));
       case 'ownSoul': return this.P[pi].souls.map(s => ({ kind: 'soul', uid: s.uid }));
       default: return [];
     }
   }
+  targetsFor(pi, def, src) { return this.targets(pi, def.target, def.type === 'juicio', src, def.filter); }
   attachOptions(pi, c) {
     const a = c.def.attach;
     if (a === 'ownEnte') return this.targets(pi, 'ownEnte', false);
@@ -183,7 +229,7 @@ export class Game {
       if (d.type === 'ilustre' && this.entes(pi).some(e => e.def.name === d.name)) return { ok: false, reason: 'Ilustre: máximo 1 en juego por nombre.' };
     }
     if (d.type === 'reliquia' && !this.attachOptions(pi, c).length) return { ok: false, reason: 'No hay dónde unir esta Reliquia.' };
-    if (d.target && !this.targets(pi, d.target, d.type === 'juicio').length) return { ok: false, reason: 'No hay objetivos legales.' };
+    if (d.target && !this.targetsFor(pi, d).length) return { ok: false, reason: 'No hay objetivos legales.' };
     return { ok: true };
   }
   canPlaySoul(pi, c) {
@@ -219,19 +265,14 @@ export class Game {
 
   // ───────────── partida ─────────────
   async run() {
-    try {
-      await this.setup();
-      while (true) await this.takeTurn();
-    } catch (e) {
-      if (e instanceof GameEnd && e.reason === 'abort') return;
-      if (e instanceof GameEnd) { this.over = e; this.phase = 'over'; await this.V.sync(); await this.H.gameOver(e); }
-      else { console.error(e); this.H.error(e); }
-    }
+    try { await this.setup(); while (true) await this.takeTurn(); }
+    catch (e) { await this.handleEnd(e); }
   }
   async setup() {
     this.phase = 'setup'; this.H.update();
     await this.V.sync();
-    this.first = Math.random() < 0.5 ? 0 : 1; this.active = this.first;
+    this.first = this.forcedFirst != null ? this.forcedFirst : (seededRng(this.seed + 99)() < 0.5 ? 0 : 1); this.active = this.first;
+    this.ev('gameStart', {});
     await this.H.announceFirst(this.first);
     this.circle = 1; await this.V.fx('circle', { circle: 1, initial: true });
     this.log(`El dado del Descenso se coloca en 1: <b>Limbo</b>.`);
@@ -248,7 +289,7 @@ export class Game {
     if (A === this.first) this.round++;
     p.soulPlayed = false; p.abilityUsed = false;
     for (const e of this.entes(A)) { e.moved = false; e.sick = false; }
-    this.H.turnStart(A); this.ev('turn', { active: A });
+    this.H.turnStart(A); this.ev('turn', { active: A, round: this.round });
     this.log(`<span class="lg-turn">Ronda ${this.round} · ${A === 0 ? 'Tu turno' : 'Turno del rival'} · Círculo ${CIRCLES[this.circle].roman}</span>`);
     // 1. INICIO
     this.setPhase('inicio'); this.step = 'enderezar';
@@ -257,16 +298,16 @@ export class Game {
       if (e.frozen) { e.frozen = false; this.log(`${e.def.name} sigue congelado y no se endereza.`); }
       else e.tapped = false;
     }
-    await this.V.sync(); await wait(250);
+    await this.V.sync(); await this.pause(250);
     this.step = 'descenso';
     if (A === this.first && this.round > 1) await this.advanceCircle('ronda');
-    for (const r of p.relics) if (r.def.startTurn) { this.log(`${r.def.name}: tu Peregrino gana 1 de Voluntad.`); await this.runOps(r.def.startTurn, r, A, null); }
+    for (const r of [...p.relics, ...p.rear.filter(x => x && x.def.type === 'reliquia')]) if (r.def.startTurn) { this.log(`${r.def.name}: ${clean(r.def.text).split(':').pop().trim()}`); await this.runOps(r.def.startTurn, r, A, null); }
+    if (p.destiny === 'redencion' && p.pid === 'eneas') await this.doOp({ op: 'gainGold', n: 1 }, null, A, null, null);
+    if (p.destiny === 'caida' && p.pid === 'farinata') { this.log('Caída de Farinata: el Peregrino rival pierde 1 de Voluntad.'); await this.changeWill(1 - A, -1); await this.checkState(); }
     if (this.circle === 2) await this.lujuria(A);
     this.step = 'robo'; this.H.update();
-    if (!(A === this.first && this.turnOf[A] === 1)) {
-      await this.drawOne(A, 'paso de robo');
-      if (this.circle === 3) { this.log('Gula: robo adicional.'); await this.drawOne(A, 'Gula: robo adicional'); }
-    } else this.log('El jugador inicial no roba en su primer turno.');
+    await this.drawOne(A, 'paso de robo');
+    if (this.circle === 3) { this.log('Gula: robo adicional.'); await this.drawOne(A, 'Gula: robo adicional'); }
     this.step = null;
     await this.priorityLoop('inicio');
     this.endPhasePool();
@@ -284,11 +325,12 @@ export class Game {
     this.endPhasePool();
     // 5. FINAL
     this.setPhase('final');
-    for (const r of p.rear) if (r && r.def.endTurn) { this.log(`${r.def.name}: tu Peregrino gana 1 de Voluntad.`); await this.runOps(r.def.endTurn, r, A, null); }
+    for (const r of p.rear) if (r && r.def.endTurn) { this.log(`${r.def.name}: ${clean(r.def.text).split(':').pop().trim()}`); await this.runOps(r.def.endTurn, r, A, null); }
     await this.checkState();
     await this.priorityLoop('final');
     this.endPhasePool();
     for (const e of this.allEntes()) { e.damage = 0; e.tempF = 0; e.tempR = 0; e.protectedFrom = null; }
+    this.fog = [false, false];
     await this.V.sync();
     if (p.hand.length > 7) { const n = p.hand.length - 7; this.log(`Descarte hasta 7: ${A === 0 ? 'descartas' : 'el rival descarta'} ${n}.`); await this.discard(A, n, 'límite de mano'); }
     if (this.circle === 9 && A !== this.first) await this.finalJudgment();
@@ -321,11 +363,17 @@ export class Game {
     this.log(`Lujuria: el vendaval arrastra a ${e.def.name} a la ${this.rowOf(e) === 'van' ? 'Vanguardia' : 'Retaguardia'}.`);
     await this.V.sync();
   }
+  // Cambiar de fila: si estaba en combate, sale de él. Dispara «al cambiar de fila».
   moveRow(e, slot) {
     const p = this.P[e.ctrl]; const row = this.rowOf(e); const to = row === 'van' ? 'rear' : 'van';
     const free = this.freeSlots(e.ctrl, to); if (!free.length) return false;
     const dest = slot != null && free.includes(slot) ? slot : free[0];
-    p[row][p[row].indexOf(e)] = null; p[to][dest] = e; e.zone = to; return true;
+    p[row][p[row].indexOf(e)] = null; p[to][dest] = e; e.zone = to;
+    if (e.attacking) { e.attacking = false; e.siege = null; }
+    if (e.blocking) { e.blocking = null; }
+    if (e.def.onMove) this.pending.push({ ctrl: e.ctrl, src: e, fx: e.def.onMove, name: e.def.name, text: clean(e.def.text) });
+    this.ev('rowChange', { pi: e.ctrl, uid: e.uid });
+    return true;
   }
   async drawOne(pi, reason) {
     this.checkAbort();
@@ -399,10 +447,18 @@ export class Game {
     p.hand.splice(p.hand.indexOf(s), 1); s.zone = 'souls'; s.faceDown = mode === 'condemn'; s.tapped = false; p.souls.push(s); p.soulPlayed = true;
     const who = pi === 0 ? 'Tú' : 'El rival';
     if (mode === 'absolve') this.log(`${who} <b class="lg-gold">absuelve</b> a ${s.def.name}: boca arriba, aporta ${s.def.senda ? 'su símbolo de ' + SENDAS[s.def.senda].name : 'energía (sin Senda)'}. Balanza → Virtud.`);
-    else this.log(`${who} <b class="lg-ash">condena</b> a ${s.def.name}: boca abajo. Condena: «${s.def.text}» Balanza → Corrupción.`);
+    else this.log(`${who} <b class="lg-ash">condena</b> a ${s.def.name}: boca abajo. Condena: «${clean(s.def.text)}» Balanza → Corrupción.`);
     await this.V.fx(mode === 'absolve' ? 'absolve' : 'condemn', { uid: s.uid, pi });
     this.H.tip(mode === 'absolve' ? 'absolver' : 'condenar');
-    this.ev('soul', { pi, uid: s.uid, mode, senda: s.def.senda });
+    this.ev('soul', { pi, uid: s.uid, mode, senda: s.def.senda, id: s.id });
+    if (mode === 'absolve') {
+      this.log(`Gracia: ${pi === 0 ? 'tu Peregrino gana' : 'el Peregrino rival gana'} 1 de Voluntad.`, 'lg-gold');
+      await this.changeWill(pi, 1);
+      if (p.destiny === 'redencion' && p.pid === 'forese') {
+        const t = this.entes(pi).sort((x, y) => this.force(x) - this.force(y))[0];
+        if (t) { t.permF++; t.permR++; this.log(`Redención de Forese: ${t.def.name} recibe +1/+1 para siempre.`); await this.V.fx('buff', { uid: t.uid }); }
+      }
+    }
     await this.afterBalance(pi);
     if (mode === 'condemn') await this.runSpec(s.def.condemn, s, pi, null, 'Condena');
     await this.checkState();
@@ -418,7 +474,7 @@ export class Game {
       p.destiny = b.diff > 0 ? 'redencion' : 'caida';
       const txt = p.destiny === 'redencion' ? p.pilgrim.redencion.text : p.pilgrim.caida.text;
       this.log(`<b>Destino: ${p.destiny === 'redencion' ? 'Redención' : 'Caída'}</b>. ${pi === 0 ? 'Tu' : 'El'} Peregrino desbloquea para siempre: «${txt}» El otro Destino queda sellado.`, 'lg-circle');
-      await this.V.fx('destiny', { pi, destiny: p.destiny }); this.H.tip('destino'); this.ev('destiny', { pi, destiny: p.destiny });
+      await this.V.fx('destiny', { pi, destiny: p.destiny }); this.H.tip('destino'); this.ev('destiny', { pi, destiny: p.destiny, round: this.round });
     }
     this.H.update();
   }
@@ -435,6 +491,7 @@ export class Game {
     this.ev('cast', { pi, item: it, id: c.id });
     this.H.tip(c.def.type === 'juicio' ? 'juicio' : 'cadena');
     if (this.chain.length >= 2) this.H.tip('cadena2');
+    if (c.def.type === 'juicio' && p.destiny === 'caida' && p.pid === 'ulises') { this.log('Caída de Ulises: Sepultar 2.'); await this.doOp({ op: 'mill', n: 2, who: 'opp' }, null, pi, null, null); }
     return true;
   }
   describeTarget(it) {
@@ -464,10 +521,10 @@ export class Game {
     this.chain.push(it); await this.V.fx('chainIn', { item: it });
     return true;
   }
+  // Disparadores: entran en la Cadena en orden APNAP; los de cada jugador, en el orden en que se dispararon.
   async flushTriggers() {
     if (!this.pending.length) return false;
     const list = this.pending.splice(0);
-    // APNAP: los del jugador activo entran primero (resuelven después)
     list.sort((a, b) => (a.ctrl === this.active ? 0 : 1) - (b.ctrl === this.active ? 0 : 1));
     let any = false;
     for (const tr of list) {
@@ -478,7 +535,7 @@ export class Game {
         const pick = await this.io[tr.ctrl].chooseTarget(this, tr.ctrl, cands, `${tr.name}: elige objetivo — ${tr.text}`, false, { fx: tr.fx, harm: true });
         targets = [pick || cands[0]];
       }
-      const it = { id: this.chainId++, kind: 'trigger', ctrl: tr.ctrl, spec: { fx: tr.fx, target: tr.target }, srcCard: tr.src, targets, name: tr.name, text: tr.text, senda: tr.src.def.senda };
+      const it = { id: this.chainId++, kind: 'trigger', ctrl: tr.ctrl, spec: { fx: tr.fx, target: tr.target }, srcCard: tr.src && tr.src.uid ? tr.src : null, srcPilgrim: tr.srcPilgrim, targets, name: tr.name, text: tr.text, senda: tr.src && tr.src.def ? tr.src.def.senda : null };
       this.chain.push(it); any = true;
       this.log(`Disparador: <b>${tr.name}</b> — ${tr.text} Entra en la Cadena.`);
       await this.V.fx('chainIn', { item: it });
@@ -500,8 +557,8 @@ export class Game {
           p[row][slot] = c; c.zone = row; c.ctrl = it.ctrl; c.sick = true; c.moved = false; c.tapped = false; c.damage = 0;
           this.log(`Resuelve ${d.name}: entra en ${row === 'van' ? 'la Vanguardia' : 'la Retaguardia'} (${this.force(c)}/${this.res(c)}).`);
           await this.V.fx('enter', { uid: c.uid, pi: it.ctrl });
-          if (d.onEnter) this.pending.push({ ctrl: it.ctrl, src: c, fx: d.onEnter, target: d.onEnterTarget, name: d.name, text: d.text.replace(/\*/g, '') });
-          if (this.balance(it.ctrl).state !== 'tibio' && d.cond) this.H.tip('cond');
+          if (d.onEnter) this.pending.push({ ctrl: it.ctrl, src: c, fx: d.onEnter, target: d.onEnterTarget, name: d.name, text: clean(d.text) });
+          if (d.cond) this.H.tip('cond');
           this.ev('enter', { pi: it.ctrl, uid: c.uid, id: c.id });
         }
       } else if (d.type === 'reliquia') {
@@ -514,7 +571,8 @@ export class Game {
       } else {
         const ok = await this.runSpec(d, c, it.ctrl, it.targets, d.name);
         c.zone = 'olvido'; this.P[c.owner].olvido.push(c);
-        if (ok && d.type === 'juicio' && p.destiny === 'caida' && p.pid === 'virgilio') { this.log('Caída de Virgilio: el Peregrino rival pierde 1 de Voluntad.'); await this.changeWill(1 - it.ctrl, -1); }
+        if (ok && d.type === 'juicio' && p.destiny === 'caida' && p.pid === 'virgilio') { this.log('Caída de Virgilio: el Peregrino rival pierde 2 de Voluntad.'); await this.changeWill(1 - it.ctrl, -2); }
+        if (ok && d.type === 'juicio' && p.destiny === 'redencion' && p.pid === 'virgilio') { this.log('Redención de Virgilio: ganas 1 de Voluntad.'); await this.changeWill(it.ctrl, 1); }
         await this.V.sync();
       }
     } else {
@@ -525,13 +583,14 @@ export class Game {
   }
 
   // ───────────── efectos ─────────────
-  legalTarget(spec, t, pi, isJuicio) {
+  legalTarget(spec, t, pi, isJuicio, filter) {
     if (!t) return false;
     if (t.kind === 'chain') return this.chain.some(x => x.id === t.id);
     if (t.kind === 'soul') return this.P[pi].souls.some(s => s.uid === t.uid);
     const e = this.find(t.uid); if (!e || !this.inPlay(e)) return false;
-    if (!this.targetable(e, pi, isJuicio)) return false;
+    if (!this.targetable(e, pi, isJuicio) || !this.passFilter(e, filter)) return false;
     if (spec === 'attacker' && !e.attacking) return false;
+    if (spec === 'combatEnte' && !(e.attacking || e.blocking)) return false;
     return true;
   }
   async runSpec(spec, src, pi, targets, name) {
@@ -539,12 +598,12 @@ export class Game {
     let target = null;
     if (spec.target) {
       if (!targets) {
-        const cands = this.targets(pi, spec.target, isJ, src);
+        const cands = this.targets(pi, spec.target, isJ, src, spec.filter);
         if (!cands.length) { this.log(`${name}: no hay objetivo legal.`); return false; }
         const pick = await this.io[pi].chooseTarget(this, pi, cands, `${name}: elige objetivo`, false, spec);
         targets = [pick || cands[0]];
       }
-      if (!this.legalTarget(spec.target, targets[0], pi, isJ)) {
+      if (!this.legalTarget(spec.target, targets[0], pi, isJ, spec.filter)) {
         this.log(`<b>${name}</b> se anula: su objetivo ya no es legal.`, 'lg-fizzle');
         await this.V.fx('fizzle', { name }); this.H.tip('anula'); this.ev('fizzle', { name }); return false;
       }
@@ -555,7 +614,7 @@ export class Game {
   }
   async runOps(ops, src, pi, target) {
     const T = target && target.kind === 'card' ? this.find(target.uid) : null;
-    for (const op of ops) await this.doOp(op, src, pi, target, T);
+    for (const op of ops) { if (op.if && !this.condOk(pi, { if: op.if })) continue; await this.doOp(op, src, pi, target, T); }
     await this.V.sync();
   }
   async changeWill(pi, delta) {
@@ -568,22 +627,54 @@ export class Game {
     const opp = 1 - pi; const nm = x => x ? x.def.name : '';
     switch (op.op) {
       case 'damage': if (T) { T.damage += op.n; this.log(`${nm(T)} recibe ${op.n} de daño.`); await this.V.fx('damage', { uid: T.uid, n: op.n }); } break;
+      case 'damageAll': {
+        const list = op.who === 'enemyVan' ? this.P[opp].van.filter(isEnte) : this.entes(opp);
+        this.log(`${nm(src) || 'El efecto'} inflige ${op.n} de daño a ${list.length} Entes rivales.`);
+        for (const e of list) { e.damage += op.n; await this.V.fx('damage', { uid: e.uid, n: op.n }); }
+        break;
+      }
       case 'buff': if (T) { T.tempF += op.f; T.tempR += op.r; this.log(`${nm(T)} recibe +${op.f}/+${op.r} este turno.`); await this.V.fx('buff', { uid: T.uid }); } break;
-      case 'grow': if (src && this.inPlay(src)) { src.permF += op.f; src.permR += op.r; this.log(`${nm(src)} recibe +${op.f}/+${op.r} para siempre.`); await this.V.fx('buff', { uid: src.uid }); } break;
+      case 'grow': { const x = T && (!src || !this.inPlay(src) || src.soul || src.def.type !== 'ente' && src.def.type !== 'ilustre') ? T : src; if (x && this.inPlay(x)) { x.permF += op.f; x.permR += op.r; this.log(`${nm(x)} recibe +${op.f}/+${op.r} para siempre.`); await this.V.fx('buff', { uid: x.uid }); } break; }
+      case 'growAll': for (const e of this.entes(pi)) { e.permF += op.f; e.permR += op.r; await this.V.fx('buff', { uid: e.uid }); } this.log(`Tus Entes reciben +${op.f}/+${op.r} para siempre.`); break;
       case 'protect': if (T) { T.protectedFrom = 1 - T.ctrl; this.log(`${nm(T)} no puede ser elegido por Juicios rivales este turno.`); await this.V.fx('buff', { uid: T.uid }); } break;
       case 'draw': for (let i = 0; i < op.n; i++) await this.drawOne(pi, src ? nm(src) : 'efecto'); break;
       case 'discard': await this.discard(pi, op.n, src ? nm(src) : 'efecto'); break;
       case 'gainWill': this.log(`${pi === 0 ? 'Tu Peregrino gana' : 'El Peregrino rival gana'} ${op.n} de Voluntad.`); await this.changeWill(pi, op.n); break;
       case 'loseWillOpp': this.log(`${opp === 0 ? 'Tu Peregrino pierde' : 'El Peregrino rival pierde'} ${op.n} de Voluntad.`); await this.changeWill(opp, -op.n); break;
+      case 'gainGold': { const p = this.P[pi]; const add = Math.min(3 - p.gold, op.n); p.gold += add; this.log(`${pi === 0 ? 'Ganas' : 'El rival gana'} ${add} de Oro (${p.gold}/3).`, 'lg-gold'); this.H.update(); this.ev('gold', { pi, add }); break; }
+      case 'spendGoldDraw': { const p = this.P[pi]; const n = p.gold; p.gold = 0; this.log(`${pi === 0 ? 'Gastas' : 'El rival gasta'} ${n} de Oro.`); for (let i = 0; i < n; i++) await this.drawOne(pi, 'Usura'); break; }
       case 'tap': if (T) { T.tapped = true; if (op.freeze) T.frozen = true; this.log(`${nm(T)} queda agotado${op.freeze ? ' y congelado' : ''}.`); await this.V.fx('freeze', { uid: T.uid }); } break;
-      case 'tapAllEnemy': for (const e of this.entes(opp)) { e.tapped = true; if (op.freeze) e.frozen = true; await this.V.fx('freeze', { uid: e.uid }); } this.log('El Cocito congela los Entes rivales.'); break;
-      case 'removeCombat': if (T) { T.attacking = false; this.log(`${nm(T)} deja de atacar.`); await this.V.fx('freeze', { uid: T.uid }); } break;
+      case 'tapAllEnemy': for (const e of this.entes(opp)) { e.tapped = true; if (op.freeze) e.frozen = true; await this.V.fx('freeze', { uid: e.uid }); } this.log('El hielo congela los Entes rivales.'); break;
+      case 'removeCombat': if (T) { T.attacking = false; T.siege = null; this.log(`${nm(T)} deja de atacar.`); await this.V.fx('freeze', { uid: T.uid }); } break;
+      case 'removeCombatAll': for (const e of this.allEntes()) if (e.attacking) { e.attacking = false; e.siege = null; await this.V.fx('freeze', { uid: e.uid }); } this.log('Todos los atacantes dejan de atacar.'); break;
+      case 'fog': this.fog[pi] = true; this.log(`${pi === 0 ? 'Tu Peregrino' : 'El Peregrino rival'} no recibirá daño de combate este turno.`); break;
+      case 'destroy': if (T) { this.log(`${nm(T)} es destruido.`); await this.kill(T, 'destruido'); } break;
+      case 'shift': if (T && this.inPlay(T)) { if (this.moveRow(T)) { this.log(`${nm(T)} pasa a la ${this.rowOf(T) === 'van' ? 'Vanguardia' : 'Retaguardia'}.`); await this.V.fx('move', { uid: T.uid }); } else this.log(`${nm(T)} no puede cambiar de fila: no hay hueco.`); } break;
       case 'counter': {
-        const i = this.chain.findIndex(x => x.id === target.id);
-        if (i >= 0) { const it = this.chain.splice(i, 1)[0]; this.log(`<b>${it.name}</b> queda anulado.`, 'lg-fizzle'); await this.V.fx('countered', { item: it }); if (it.card) { it.card.zone = 'olvido'; this.P[it.card.owner].olvido.push(it.card); } await this.V.sync(); }
+        const i = this.chain.findIndex(x => x.id === target.id); if (i < 0) break;
+        const it = this.chain[i]; const tp = this.P[it.ctrl];
+        if (it.kind === 'spell' && it.card.def.type === 'juicio' && tp.destiny === 'redencion' && tp.pid === 'ulises') { this.log(`Redención de Ulises: <b>${it.name}</b> no puede ser anulado.`); break; }
+        this.chain.splice(i, 1); this.log(`<b>${it.name}</b> queda anulado.`, 'lg-fizzle'); await this.V.fx('countered', { item: it });
+        if (it.card) { it.card.zone = 'olvido'; this.P[it.card.owner].olvido.push(it.card); } await this.V.sync();
         break;
       }
       case 'bounce': if (T) { this.log(`${nm(T)} vuelve a la mano de su dueño.`); await this.leavePlay(T, 'hand'); } break;
+      case 'bounceAll': {
+        const list = this.P[opp].van.filter(e => isEnte(e) && (op.maxCost == null || e.def.cost <= op.maxCost));
+        for (const e of list) await this.leavePlay(e, 'hand');
+        this.log(`${list.length} Entes rivales vuelven a la mano de su dueño.`); await this.V.sync(); break;
+      }
+      case 'mill': {
+        const who = op.who === 'self' ? pi : opp; const p = this.P[who]; const uids = [];
+        for (let i = 0; i < op.n && p.main.length; i++) { const c = p.main.pop(); c.zone = 'olvido'; p.olvido.push(c); uids.push(c.uid); }
+        this.log(`Sepultar ${op.n}: ${uids.length} cartas del Mazo Principal ${who === 0 ? 'tuyo' : 'rival'} van al Olvido.`, 'lg-ash');
+        await this.V.fx('mill', { pi: who, uids }); this.ev('mill', { pi: who, n: uids.length }); break;
+      }
+      case 'exhume': {
+        const p = this.P[pi]; let k = -1; for (let i = p.olvido.length - 1; i >= 0; i--) if (isEnteDef(p.olvido[i])) { k = i; break; }
+        if (k < 0) { this.log('No hay ningún Ente en tu Olvido.'); break; }
+        const c = p.olvido.splice(k, 1)[0]; c.zone = 'hand'; p.hand.push(c); this.log(`${pi === 0 ? 'Recuperas' : 'El rival recupera'} ${c.def.name} del Olvido.`); await this.V.sync(); break;
+      }
       case 'descend': await this.advanceCircle('Descender'); break;
       case 'flip': {
         const s = this.P[pi].souls.find(x => target && x.uid === target.uid);
@@ -615,7 +706,7 @@ export class Game {
     if (row) p[row][p[row].indexOf(e)] = null;
     for (const r of e.attached) { r.zone = 'olvido'; r.attachedTo = null; this.P[r.owner].olvido.push(r); }
     e.attached = [];
-    Object.assign(e, { tapped: false, sick: false, damage: 0, tempF: 0, tempR: 0, permF: 0, permR: 0, frozen: false, protectedFrom: null, attacking: false, blockedBy: null, blocking: null, ctrl: e.owner });
+    Object.assign(e, { tapped: false, sick: false, damage: 0, tempF: 0, tempR: 0, permF: 0, permR: 0, frozen: false, protectedFrom: null, attacking: false, blockedBy: null, blocking: null, siege: null, ctrl: e.owner });
     const o = this.P[e.owner];
     if (dest === 'hand') { e.zone = 'hand'; o.hand.push(e); await this.V.sync(); }
     else if (dest === 'burn') { e.zone = 'burned'; o.burned.push(e); }
@@ -623,19 +714,24 @@ export class Game {
   }
   async kill(e, why) {
     if (!this.inPlay(e)) return;
-    const burn = this.circle === 6; const ctrl = e.ctrl;
+    const burn = this.circle === 6 && isEnte(e); const ctrl = e.ctrl;
     await this.V.fx(burn ? 'burn' : 'die', { uid: e.uid });
     this.log(`${e.def.name} ${why === 'sacrificio' ? 'es sacrificado' : 'muere'}${burn ? ' y se <b>Quema</b> (Herejía): sale de la partida' : ' y va al Olvido'}.`, burn ? 'lg-ash' : '');
     if (burn) this.H.tip('quemar');
     await this.leavePlay(e, burn ? 'burn' : 'olvido');
-    if (e.def.onDeath) this.pending.push({ ctrl, src: e, fx: e.def.onDeath, name: e.def.name, text: e.def.text.replace(/\*/g, '') });
+    if (isEnte(e)) {
+      if (e.def.onDeath) this.pending.push({ ctrl, src: e, fx: e.def.onDeath, name: e.def.name, text: clean(e.def.text) });
+      for (const a of this.entes(ctrl)) if (a.def.onAllyDeath) this.pending.push({ ctrl, src: a, fx: a.def.onAllyDeath, name: a.def.name, text: clean(a.def.text) });
+      const P = this.P[ctrl];
+      if (P.destiny === 'caida' && P.pid === 'forese') this.pending.push({ ctrl, src: { def: { name: 'Forese', senda: 'gula' } }, srcPilgrim: ctrl, fx: [{ op: 'loseWillOpp', n: 1 }], name: 'Caída de Forese', text: 'El Peregrino rival pierde 1 de Voluntad.' });
+    }
     await this.V.sync(); this.ev('death', { uid: e.uid, id: e.id, pi: ctrl });
   }
   async checkState() {
     let changed = true;
     while (changed) {
       changed = false;
-      for (const e of this.allEntes()) if (e.damage >= this.res(e)) { await this.kill(e, 'daño'); changed = true; break; }
+      for (const e of this.allEntes()) if (e.damage >= this.res(e) || this.res(e) <= 0) { await this.kill(e, 'daño'); changed = true; break; }
     }
     for (const pi of [0, 1]) await this.afterBalance(pi);
     const d0 = this.P[0].will <= 0, d1 = this.P[1].will <= 0;
@@ -657,10 +753,11 @@ export class Game {
     return out;
   }
   canBlock(b, a) { return !this.hasKw(a, 'vuelo') || this.hasKw(b, 'vuelo'); }
+  siegeTargets(A) { return this.P[1 - A].rear.filter(isEnte); }
   async combat() {
     const A = this.active, D = 1 - A;
     this.step = 'atacantes'; this.H.update();
-    if (this.circle === 1) { this.log('Limbo: los Entes no pueden atacar. Ronda de despliegue.'); this.H.tip('limbo'); await wait(400); this.step = null; return; }
+    if (this.circle === 1) { this.log('Limbo: los Entes no pueden atacar. Ronda de despliegue.'); this.H.tip('limbo'); await this.pause(400); this.step = null; return; }
     const cands = this.attackCandidates(A);
     if (!cands.length) { this.log(`${A === 0 ? 'No tienes' : 'El rival no tiene'} Entes que puedan atacar.`); this.step = null; return; }
     const mandatory = cands.filter(e => this.hasKw(e, 'iraCiega'));
@@ -668,9 +765,18 @@ export class Game {
     chosen = [...new Set([...chosen, ...mandatory.map(e => e.uid)])];
     const attackers = cands.filter(e => chosen.includes(e.uid));
     if (!attackers.length) { this.log(`${A === 0 ? 'No atacas' : 'El rival no ataca'} este turno.`); this.step = null; return; }
-    for (const e of attackers) { e.tapped = true; e.attacking = true; e.wasBlocked = false; }
-    this.log(`${A === 0 ? 'Declaras' : 'El rival declara'} atacantes: ${attackers.map(e => `${e.def.name} (${this.force(e)})`).join(', ')}. Todos atacan al Peregrino ${A === 0 ? 'rival' : 'tuyo'}.`);
+    for (const e of attackers) { e.tapped = true; e.attacking = true; e.wasBlocked = false; e.siege = null; }
+    // Asedio: cada atacante con Asedio elige su objetivo
+    for (const e of attackers) {
+      if (!this.hasKw(e, 'asedio')) continue;
+      const rear = this.siegeTargets(A); if (!rear.length) continue;
+      const cand = [{ kind: 'pilgrim', player: D }, ...rear.map(x => ({ kind: 'card', uid: x.uid }))];
+      const pick = await this.io[A].chooseSiegeTarget(this, A, e.uid, cand);
+      if (pick && pick.kind === 'card') { e.siege = pick.uid; this.log(`${e.def.name} asedia a ${this.find(pick.uid).def.name} en la Retaguardia.`); this.H.tip('asedio'); }
+    }
+    this.log(`${A === 0 ? 'Declaras' : 'El rival declara'} atacantes: ${attackers.map(e => `${e.def.name} (${this.force(e)})`).join(', ')}.`);
     await this.V.fx('attack', { uids: attackers.map(e => e.uid) }); this.H.tip('atacar'); this.ev('attack', { pi: A, uids: attackers.map(e => e.uid) });
+    for (const e of attackers) if (e.def.onAttack) this.pending.push({ ctrl: A, src: e, fx: e.def.onAttack, target: e.def.onAttackTarget, name: e.def.name, text: clean(e.def.text) });
     await this.priorityLoop('atacantes');
     let live = attackers.filter(e => e.attacking && this.inPlay(e));
     if (live.length) {
@@ -694,7 +800,7 @@ export class Game {
     this.step = 'fin'; this.H.update();
     await this.checkState();
     await this.priorityLoop('fin de combate');
-    for (const e of this.allEntes()) { e.attacking = false; e.blockedBy = null; e.blocking = null; e.wasBlocked = false; }
+    for (const e of this.allEntes()) { e.attacking = false; e.blockedBy = null; e.blocking = null; e.wasBlocked = false; e.siege = null; }
     this.step = null; await this.V.sync();
   }
   async combatDamage(A) {
@@ -710,8 +816,11 @@ export class Game {
         const aStrikes = firstStrike ? this.hasKw(a, 'primerGolpe') : !dealt.has(a.uid);
         if (aStrikes) {
           dealt.add(a.uid); const f = this.force(a);
-          if (!a.wasBlocked) { pilgrim += f; hits.push({ from: a.uid, toPilgrim: D, n: f }); }
-          else if (bAlive) {
+          if (!a.wasBlocked) {
+            const st = a.siege ? this.find(a.siege) : null;
+            if (st && this.inPlay(st) && this.rowOf(st) === 'rear') hits.push({ from: a.uid, to: st.uid, n: f, siege: true });
+            else { pilgrim += f; hits.push({ from: a.uid, toPilgrim: D, n: f }); }
+          } else if (bAlive) {
             const remaining = this.res(b) - b.damage; hits.push({ from: a.uid, to: b.uid, n: f });
             if (this.circle === 7 && f > remaining) { const ex = f - Math.max(0, remaining); pilgrim += ex; hits.push({ from: a.uid, toPilgrim: D, n: ex, excess: true }); }
           }
@@ -722,16 +831,15 @@ export class Game {
         }
       }
       if (!hits.length) return;
-      await this.V.fx('combatHits', { hits, first: firstStrike });
+      if (this.fog[D] && pilgrim > 0) { this.log(`El Peregrino ${D === 0 ? 'tuyo' : 'rival'} está protegido: no recibe daño de combate.`); pilgrim = 0; for (const h of hits) if (h.toPilgrim != null) h.n = 0; }
+      await this.V.fx('combatHits', { hits: hits.filter(h => h.n > 0), first: firstStrike });
+      for (const h of hits) { if (h.to) { const t = this.find(h.to); if (t) t.damage += h.n; } }
       for (const h of hits) {
-        if (h.to) { const t = this.find(h.to); if (t) t.damage += h.n; }
-      }
-      for (const h of hits) {
-        const src = this.find(h.from);
-        if (h.to) { const t = this.find(h.to); this.log(`${src.def.name} hace ${h.n} de daño a ${t.def.name}.`); }
+        const src = this.find(h.from); if (h.n <= 0) continue;
+        if (h.to) { const t = this.find(h.to); this.log(`${src.def.name} hace ${h.n} de daño a ${t.def.name}${h.siege ? ' (Asedio)' : ''}.`); }
         else this.log(`${src.def.name} hace ${h.n} de daño ${h.excess ? 'sobrante (Violencia) ' : ''}al Peregrino ${h.toPilgrim === 0 ? 'tuyo' : 'rival'}.`, 'lg-dmg');
       }
-      if (pilgrim > 0) await this.changeWill(D, -pilgrim);
+      if (pilgrim > 0) { await this.changeWill(D, -pilgrim); this.ev('combatDamage', { pi: D, n: pilgrim }); }
       if (this.circle === 7 && hits.some(h => h.excess)) this.H.tip('violencia');
       let changed = true;
       while (changed) { changed = false; for (const e of this.allEntes()) if (e.damage >= this.res(e)) { await this.kill(e, 'daño'); changed = true; break; } }

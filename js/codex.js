@@ -1,5 +1,5 @@
 // SULPHUR — Códice: el contenido íntegro del «Núcleo de reglas» y la «Dirección artística», consultable en la demo.
-import { CIRCLES, SENDAS, SENDA_KEYS, TYPES, KEYWORDS } from './data.js';
+import { CIRCLES, SENDAS, SENDA_KEYS, TYPES, KEYWORDS, PILGRIMS, PILGRIM_IDS, CARDS } from './data.js';
 
 const ic = k => `<i class="ic" data-ic="${k}"></i>`;
 const circleRows = () => CIRCLES.slice(1).map(c => `<tr><td class="num">${c.roman}. ${c.name}</td><td>${c.rule}</td></tr>`).join('');
@@ -139,7 +139,7 @@ export const CODEX = [
 </ol>
 <h3>Turno</h3>
 <ol>
-<li><b>Inicio.</b> <i>a.</i> Enderezar: endereza tus Almas, Entes y Reliquias agotadas. <i>b.</i> Descenso: solo en el turno del jugador inicial, el dado del Descenso sube un número. <i>c.</i> Robo: roba 1 carta del Mazo Principal o 1 Alma. El jugador inicial no roba en su primer turno.</li>
+<li><b>Inicio.</b> <i>a.</i> Enderezar: endereza tus Almas, Entes y Reliquias agotadas. <i>b.</i> Descenso: solo en el turno del jugador inicial, el dado del Descenso sube un número. <i>c.</i> Robo: roba 1 carta del Mazo Principal o 1 Alma. <b>Alpha:</b> el jugador inicial también roba en su primer turno.</li>
 <li><b>Fase principal 1.</b> Juega hasta 1 Alma, Entes, Ritos, Reliquias y Juicios. Mueve Entes entre filas (una vez por Ente y turno).</li>
 <li><b>Combate.</b> Ver la sección de Combate.</li>
 <li><b>Fase principal 2.</b> Igual que la primera, pero no puedes volver a jugar Alma si ya jugaste una.</li>
@@ -331,12 +331,48 @@ export const CODEX = [
 </ul>
 <p class="note">En la demo, la mesa es ese tapete opcional: un grabado del embudo del Descenso con las zonas inscritas en los márgenes.</p>` },
 
-  { group: 'La demo', id: 'galeria', title: 'Galería de cartas', html: `<p class="lead">Todas las cartas de la demo. Las marcadas con <b>«del documento»</b> aparecen literalmente en el Núcleo de reglas; el resto son cartas de ejemplo que solo usan mecánicas definidas en él. Las cartas de Avaricia se muestran aquí porque ninguno de los dos Peregrinos jugables tiene esa Senda.</p><div id="gallery"></div>` },
+  { group: 'Set alpha', id: 'alpha', title: 'Reglas del set alpha', html: `
+<p class="lead">El <b>alpha pool</b> es el primer conjunto equilibrado de SULPHUR para el playtest: <b>${Object.keys(CARDS).length} cartas</b> de las cinco Sendas y neutrales, 18 Almas y 7 Peregrinos. Estas reglas se añaden al Núcleo o lo concretan.</p>
+<h3>Cambios de reglas</h3>
+<ul>
+<li><b>El jugador inicial roba</b> en su primer turno.</li>
+<li><b>Gracia:</b> cada vez que absuelves un Alma, tu Peregrino gana <b>1 de Voluntad</b>. Absolver ya no es solo color y Virtud: también es aguante frente a los mazos agresivos. Condenar sigue dando su efecto inmediato.</li>
+<li><b>Umbral exigente:</b> muchas cartas piden dos o tres símbolos iguales. Los Peregrinos siguen aportando sus símbolos, pero para jugar lo más potente de una Senda hay que absolver Almas de esa Senda.</li>
+<li><b>Destino a 5</b> de ventaja, pensado para el medio y final de partida. Las cartas con <b>Sin Destino</b> son fuertes al principio; las cartas con <b>Destino</b> despiertan cuando ya has elegido camino.</li>
+<li><b>La Cadena funciona como la pila de Magic:</b> lo último que entra se resuelve primero. Los disparadores entran en el orden en que suceden; si varios del mismo jugador ocurren a la vez, ese jugador elige su orden (primero los del jugador activo).</li>
+<li>Las <b>Reliquias</b> unidas a un Ente van al <b>Olvido</b> cuando ese Ente deja la mesa.</li>
+<li>Cada vez que un efecto dice «roba», eliges de qué mazo.</li>
+</ul>
+<h3>Palabras clave nuevas</h3>
+<ul>
+<li><b>Asedio:</b> al atacar, este Ente puede apuntar a un Ente de la Retaguardia rival en lugar de al Peregrino. Si nadie lo bloquea, le hace su daño (y ese Ente no devuelve el golpe). La Retaguardia deja de ser un refugio seguro.</li>
+<li><b>Al atacar:</b> disparador que entra en la Cadena al declarar a este Ente como atacante.</li>
+<li><b>Al cambiar de fila:</b> disparador cada vez que este Ente pasa de Vanguardia a Retaguardia o al revés (por tu movimiento, por Lujuria o por un efecto).</li>
+<li><b>Sepultar N:</b> pon las N cartas superiores del Mazo Principal de un jugador en su Olvido. Algunas cartas crecen con tu Olvido; otras usan Sepultar para agotar el mazo rival.</li>
+<li><b>Oro:</b> las cartas de Avaricia usan el Oro también fuera del Círculo IV: hay cartas que lo generan, que lo gastan y que crecen con él.</li>
+</ul>
+<h3>Los siete Peregrinos</h3>
+<table><tr><th>Peregrino</th><th>Habilidad base</th><th>Redención</th><th>Caída</th></tr>${PILGRIM_IDS.map(pid => { const P = PILGRIMS[pid]; return `<tr><td class="num"><b>${P.name}</b><br><small>${P.sendas.map(k => SENDAS[k].name).join(' · ')} · ${P.style}</small></td><td>${P.ability.text}</td><td>${P.redencion.text}</td><td>${P.caida.text}</td></tr>`; }).join('')}</table>
+<h3>Contra el agresivo</h3>
+<ul><li>Gracia (+1 de Voluntad al absolver), Guardianes más baratos y robustos, respuestas de coste bajo y cartas <b>Sin Destino</b> que también sirven a los mazos lentos. Los agresivos, a cambio, tienen Asedio y cartas «al atacar».</li></ul>
+<h3>Ideas de reglas de Círculo en estudio</h3>
+<p>Las reglas actuales de los Círculos se mantienen. Estas variantes buscan que cada Círculo cambie más la partida; se probarán en el siguiente alpha:</p>
+<ul>
+<li><b>II · Lujuria:</b> además, cada Ente que cambia de fila recibe +1/+0 hasta final de turno (premia los disparadores «al cambiar de fila»).</li>
+<li><b>III · Gula:</b> al final de tu turno, si tienes más de 7 cartas en la mano, descarta hasta 7.</li>
+<li><b>VI · Herejía:</b> cada vez que se Quema un Ente, su controlador pierde 1 de Voluntad.</li>
+<li><b>VII · Violencia:</b> los Entes con Asedio ignoran a los Guardianes.</li>
+<li><b>VIII · Fraude:</b> la primera vez que cada jugador juega un Juicio en su turno, Sepulta 1.</li>
+<li><b>IX · Traición:</b> al final de cada turno, el jugador con menos Voluntad puede mover de fila un Ente rival.</li>
+</ul>
+<p>Cartas del alpha que ya aprovechan los Círculos: las que dicen <b>«Círculo V o más»</b> o <b>«Círculo VII o más»</b>, los disparadores «al cambiar de fila» (brillan en Lujuria), las de Oro (Avaricia) y los Juicios baratos de Fraude.</p>` },
+
+  { group: 'La demo', id: 'galeria', title: 'Galería de cartas', html: `<p class="lead">El <b>alpha pool</b> completo. Las cartas marcadas con <b>«del documento»</b> aparecen literalmente en el Núcleo de reglas; el resto son cartas del set alpha que usan las mecánicas del Núcleo y las reglas alpha. Haz clic en una carta para leerla.</p><div id="gallery"></div>` },
 
   { group: 'La demo', id: 'controles', title: 'Cómo se juega la demo', html: `
 <h3>Controles</h3>
 <ul>
-<li><b>Aprender a jugar:</b> cuatro lecciones guiadas (portada o menú «Demo»). La voz del Libro ilumina y señala cada elemento; tú juegas cada acción. La lección III es el turno de ejemplo de este Núcleo de reglas, jugado.</li>
+<li><b>Aprender a jugar:</b> cuatro lecciones guiadas (portada). La voz del Libro ilumina y señala cada elemento; tú juegas cada acción. La lección III es el turno de ejemplo de este Núcleo de reglas, jugado.</li>
 <li><b>Tecla M</b> o el botón «Plegar mano»: esconde la mano para ver la mesa entera.</li>
 <li>Durante la partida, las <b>marcas de la guía</b> señalan con una línea el objeto del que hablan (la Balanza, la Cadena, el Descenso…), y los efectos dejan <b>textos que vuelan</b>: la energía hacia tu marcador, el símbolo absuelto hacia tu umbral, «Balanza → Virtud».</li>
 <li>Las <b>flechas</b> muestran a quién apunta cada ataque y cada objetivo; en la Cadena, las insignias <b>1º, 2º…</b> dicen el orden de resolución.</li>
@@ -350,12 +386,15 @@ export const CODEX = [
 </ul>
 <h3>Decisiones de implementación de la demo</h3>
 <ul>
-<li>El rival es un oponente de práctica que juega con las mismas reglas: SULPHUR sigue siendo un duelo 1vs1 entre Peregrinos.</li>
-<li>Los Peregrinos jugables son Francesca (Ira · Gula) y Virgilio (Traición · Fraude), los dos del ejemplo del documento. Su Redención, su Caída y la habilidad base de Francesca son de ejemplo.</li>
+<li><b>Partida contra la IA:</b> eliges tu Peregrino y tu mazo; el rival puede ser aleatorio o elegido, en tres niveles. <b>Fácil</b> juega sin plan; <b>Normal</b> juega bien sus cartas; <b>Difícil</b> calcula el combate, busca daño letal, guarda respuestas y elige mejor entre absolver y condenar.</li>
+<li><b>Multijugador:</b> uno crea la sala y comparte el código de 5 letras; el otro se une. La conexión es directa entre los dos navegadores.</li>
+<li><b>Constructor de mazos:</b> 50 cartas en el Mazo Principal y 20 Almas, máximo 3 copias (Ilustres: 1), solo de las Sendas de tu Peregrino o neutrales. Puedes compartir un mazo copiando su código.</li>
+<li><b>Datos del playtest:</b> cada partida se registra en tu navegador. Al terminar puedes enviarla como informe en GitHub o descargarla en JSON; desde la portada verás las estadísticas y podrás simular partidas IA contra IA.</li>
+<li>Los 7 Peregrinos jugables: Francesca y Virgilio son los del ejemplo del documento; los otros cinco (uno por Senda) son del set alpha. Sus Redenciones y Caídas son de ejemplo.</li>
 <li>Cuando un efecto dice «roba», eliges de qué mazo robar, igual que en el paso de robo.</li>
 <li>Las Reliquias unidas a un Ente van al Olvido cuando ese Ente deja la mesa.</li>
 <li>Lujuria: al inicio de su turno, el jugador activo mueve uno de sus Entes a la otra fila (no cuenta como su movimiento del turno).</li>
 <li>Avaricia: la energía que quede en tu reserva al final de tu fase principal 2 o de tu turno se guarda como Oro (máximo 3).</li>
-<li>Herramienta de demo «Descender»: sube el Descenso un círculo para explorar los nueve Círculos y el Juicio Final sin jugar una partida completa. No es una regla del juego.</li>
+<li>Herramienta de demo «Descender»: sube el Descenso un círculo para explorar los nueve Círculos y el Juicio Final sin jugar una partida completa. No es una regla del juego ni está disponible online.</li>
 </ul>` },
 ];
